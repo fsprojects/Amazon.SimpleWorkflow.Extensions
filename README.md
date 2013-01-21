@@ -18,7 +18,7 @@ You can also easily terminate or rerun a workflow with a few button clicks in th
 ###Project Goal
 The standard Amazon SDK provides a [AWS Flow Framework](http://docs.aws.amazon.com/amazonswf/latest/awsflowguide/welcome.html), but it's only available for Java.
 
-The facilities provided by the .Net SDK is a straight mapping to the [actions](http://docs.aws.amazon.com/amazonswf/latest/apireference/Welcome.html) available on the SWF service. Using these actions alone, it's clumbersome to build any sort of useful process out of SWF because you need to take care of a lot of plumbing yourself, including:
+The facilities provided by the .Net SDK is a straight mapping to the [actions](http://docs.aws.amazon.com/amazonswf/latest/apireference/Welcome.html) available on the SWF service. Using these actions alone, it's cumbersome to build any sort of useful process out of SWF because you need to take care of a lot of plumbing yourself, including:
 * handle task polling
 * handle exceptions (and retries) when polling tasks
 * differentiate different types of tasks
