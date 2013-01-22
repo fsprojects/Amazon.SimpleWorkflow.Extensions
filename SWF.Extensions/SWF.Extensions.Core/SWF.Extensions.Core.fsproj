@@ -38,7 +38,7 @@
   <ItemGroup>
     <Compile Include="Ext.fs" />
     <Compile Include="Model.fs" />
-    <Compile Include="SWF.fs" />
+    <Compile Include="Workers.fs" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
