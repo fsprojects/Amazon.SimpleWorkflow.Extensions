@@ -44,9 +44,4 @@ module AsyncExtensions =
 
         member this.SignalWorkflowExecutionAsync (req : SignalWorkflowExecutionRequest)       = Async.FromBeginEnd(req, this.BeginSignalWorkflowExecution, this.EndSignalWorkflowExecution)
         member this.StartWorkflowExecutionAsync (req : StartWorkflowExecutionRequest)         = Async.FromBeginEnd(req, this.BeginStartWorkflowExecution, this.EndStartWorkflowExecution)
-        member this.TerminateWorkflowExecutionAsync (req : TerminateWorkflowExecutionRequest) = Async.FromBeginEnd(req, this.BeginTerminateWorkflowExecution, this.EndTerminateWorkflowExecution)     
-
-[<AutoOpen>]
-module ModelExtensions =
-    let toTaskList name = TaskList(Name = name)
-    let toWorkflowType (name, version) = WorkflowType(Name = name, Version = version)
+        member this.TerminateWorkflowExecutionAsync (req : TerminateWorkflowExecutionRequest) = Async.FromBeginEnd(req, this.BeginTerminateWorkflowExecution, this.EndTerminateWorkflowExecution)

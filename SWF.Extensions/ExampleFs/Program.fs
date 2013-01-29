@@ -7,6 +7,9 @@ open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Model
 
+open SWF.Extensions.Core.Model
+open SWF.Extensions.Core.Workflow
+
 let client = new AmazonSimpleWorkflowClient()
 
 let decide (task : DecisionTask) = 
@@ -22,7 +25,14 @@ let onExn (exn : Exception) =
 
 [<EntryPoint>]
 let main argv = 
-    DecisionWorker.Start(client, "iwi", "transformTaskList", decide, onExn)
-    ActivityWorker.Start(client, "iwi", "transformPlayerTaskList", action, onExn)
+    let workflow = 
+        Workflow(domain = "iwi", name = "hello_world", description = "test workflow", version = "1")
+        ++> Activity("greet", "say hi", (fun _ -> printf "hello"; "my name is Yan"),
+                     60<sec>, 10<sec>, 10<sec>, 20<sec>)
+        ++> Activity("echo", "echo", (fun str -> printf "%s" str; ""),
+                     60<sec>, 10<sec>, 10<sec>, 20<sec>)
+        
+    workflow.Start(client)
+
     Console.ReadKey() |> ignore
     0

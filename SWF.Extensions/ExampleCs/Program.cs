@@ -18,34 +18,13 @@ namespace ExampleCs
         private static void Main(string[] args)
         {
             Start();
+
+            Console.ReadKey();
         }
 
         private static void Start()
         {
             var client = new AmazonSimpleWorkflowClient();
-
-            var res = client.PollForDecisionTask(new PollForDecisionTaskRequest
-                {
-                    Domain = "iwi",
-                    TaskList = new TaskList { Name = "transformTaskList" }
-                });
-
-            //var task = res.PollForDecisionTaskResult.DecisionTask;
-            //Console.WriteLine("Received task {0}", task.TaskToken);
-
-            DecisionWorker.Start(client, "iwi", "transformTaskList", CompleteWorkflow, PrintError, 1);
-
-            Console.ReadKey();
-        }
-
-        private static Decisions[] CompleteWorkflow(DecisionTask task)
-        {
-            return new[] { Decisions.NewCompleteWorkflowExecution(new FSharpOption<string>("All done")) };
-        }
-
-        private static void PrintError(Exception exn)
-        {
-            Console.WriteLine(exn);
         }
     }
 }

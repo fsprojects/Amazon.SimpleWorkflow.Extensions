@@ -7,6 +7,8 @@ open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Model
 
+open SWF.Extensions.Core.Model
+
 /// Encapsulates the work a decision worker performs (i.e. take a decision task and make some decisions).
 /// This class handles the boilerplate of: 
 ///     polling for tasks
@@ -16,23 +18,24 @@ type DecisionWorker private (
                                 clt          : AmazonSimpleWorkflowClient,
                                 domain       : string,
                                 tasklist     : string,                             
-                                decide       : DecisionTask -> Decisions[],  // function that makes the decisions based on task
-                                onExn        : Exception -> unit,            // function that handles exceptions
-                                ?concurrency : int                           // the number of concurrent workers
+                                decide       : DecisionTask -> Decision[] * string, // function that makes the decisions based on task, and a new execution context
+                                onExn        : Exception -> unit,                   // function that handles exceptions
+                                ?concurrency : int                                  // the number of concurrent workers
                              ) = 
     let concurrency = defaultArg concurrency 1
 
     let handler = async {
         while true do
             try
-                let pollReq = PollForDecisionTaskRequest(Domain = domain, TaskList = toTaskList tasklist)
+                let pollReq = PollForDecisionTaskRequest(Domain = domain, TaskList = TaskList(Name = tasklist), ReverseOrder = true)
                 let! pollRes = clt.PollForDecisionTaskAsync(pollReq)
-                let task = pollRes.PollForDecisionTaskResult.DecisionTask
+                let task = DecisionTask(pollRes.PollForDecisionTaskResult.DecisionTask)
 
-                let decisions = decide(task) |> Array.map (fun x -> x.ToDecision())
+                let decisions, execContext = decide(task) |> (fun (decisions, cxt) -> decisions |> Array.map (fun x -> x.ToSwfDecision()), cxt)
                 let req = RespondDecisionTaskCompletedRequest()
                             .WithTaskToken(task.TaskToken)
                             .WithDecisions(decisions)
+                            .WithExecutionContext(execContext)
                 do! clt.RespondDecisionTaskCompletedAsync(req) |> Async.Ignore
             with exn -> 
                 // invoke the supplied exception handler
@@ -45,7 +48,7 @@ type DecisionWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        decide          : Func<DecisionTask, Decisions[]>,
+                        decide          : Func<DecisionTask, Decision[] * string>,
                         onExn           : Action<Exception>) =
         let decide, onExn = (fun t -> decide.Invoke(t)), (fun exn -> onExn.Invoke(exn))
         DecisionWorker(clt, domain, tasklist, decide, onExn) |> ignore
@@ -54,7 +57,7 @@ type DecisionWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        decide          : Func<DecisionTask, Decisions[]>,
+                        decide          : Func<DecisionTask, Decision[] * string>,
                         onExn           : Action<Exception>,
                         concurrency     : int) =
         let decide, onExn = (fun t -> decide.Invoke(t)), (fun exn -> onExn.Invoke(exn))
@@ -64,7 +67,7 @@ type DecisionWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        decide          : DecisionTask -> Decisions[],
+                        decide          : DecisionTask -> Decision[] * string,
                         onExn           : Exception -> unit,
                         ?concurrency    : int) =
         DecisionWorker(clt, domain, tasklist, decide, onExn, ?concurrency = concurrency) |> ignore
@@ -80,7 +83,7 @@ type ActivityWorker private (
                                 clt             : AmazonSimpleWorkflowClient,
                                 domain          : string,
                                 tasklist        : string,
-                                work            : ActivityTask -> string,      // function that performs the activity and returns its result
+                                work            : string -> string,            // function that performs the activity and returns its result
                                 onExn           : Exception -> unit,           // function that handles exceptions
                                 ?heartbeatFreq  : TimeSpan,                    // how frequently we should respond with a heartbeat
                                 ?concurrency    : int                          // the number of concurrent workers                                
@@ -90,7 +93,7 @@ type ActivityWorker private (
 
     // function to poll for activity tasks to perform
     let pollTask () = async {
-        let pollReq = PollForActivityTaskRequest(Domain = domain, TaskList = toTaskList tasklist)
+        let pollReq = PollForActivityTaskRequest(Domain = domain, TaskList = TaskList(Name = tasklist))
         let! pollRes = clt.PollForActivityTaskAsync(pollReq)
         return pollRes.PollForActivityTaskResult.ActivityTask
     }
@@ -110,7 +113,7 @@ type ActivityWorker private (
 
         let handler = async {
             try 
-                let result = work(task)
+                let result = work(task.Input)
                 let req = RespondActivityTaskCompletedRequest()
                             .WithTaskToken(task.TaskToken)
                             .WithResult(result)
@@ -149,7 +152,7 @@ type ActivityWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        work            : Func<ActivityTask, string>,
+                        work            : Func<string, string>,
                         onExn           : Action<Exception>) =
         let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
         ActivityWorker(clt, domain, tasklist, work, onExn) |> ignore
@@ -158,7 +161,7 @@ type ActivityWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        work            : Func<ActivityTask, string>,
+                        work            : Func<string, string>,
                         onExn           : Action<Exception>,
                         concurrency     : int) =
         let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
@@ -168,7 +171,7 @@ type ActivityWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        work            : Func<ActivityTask, string>,
+                        work            : Func<string, string>,
                         onExn           : Action<Exception>,
                         heartbeatFreq   : TimeSpan) =
         let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
@@ -179,7 +182,7 @@ type ActivityWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        work            : Func<ActivityTask, string>,
+                        work            : Func<string, string>,
                         onExn           : Action<Exception>,
                         heartbeatFreq   : TimeSpan,
                         concurrency     : int) =
@@ -190,7 +193,7 @@ type ActivityWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        work            : ActivityTask -> string,
+                        work            : string -> string,
                         onExn           : Exception -> unit,
                         ?heartbeatFreq  : TimeSpan,
                         ?concurrency    : int) =
