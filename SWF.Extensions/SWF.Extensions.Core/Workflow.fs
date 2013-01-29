@@ -138,10 +138,11 @@ type Workflow (domain, name, description, version, ?taskList,
                                                     ?execStartToCloseTimeout = execStartToCloseTimeout,
                                                     ?childPolicy             = childPolicy)
 
-    member this.Start swfClt = 
+    member this.Register swfClt = 
         // register the workflow type and activity types
         register swfClt |> ignore
 
+    member this.Start swfClt = 
         startDecisionWorker  swfClt
         startActivityWorkers swfClt
 

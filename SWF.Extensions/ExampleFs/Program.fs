@@ -12,27 +12,25 @@ open SWF.Extensions.Core.Workflow
 
 let client = new AmazonSimpleWorkflowClient()
 
-let decide (task : DecisionTask) = 
-    //[| CompleteWorkflowExecution(Some "All done") |]
-    seq { 1..10 }
-    |> Seq.map (fun n -> ScheduleActivityTask(sprintf "%d" n, ActivityType(Name = "TransformPlayerData", Version = "5"), None, None, None, None, None, None, None))
-    |> Seq.toArray
+let greet _ =
+    printf "hello"
+    "my name is Yan"
 
-let action (task : ActivityTask) = sprintf "%s done" task.ActivityId
-
-let onExn (exn : Exception) = 
-    printf "%A" exn
+let echo str = 
+    printf "%s" str
+    ""
 
 [<EntryPoint>]
 let main argv = 
     let workflow = 
         Workflow(domain = "iwi", name = "hello_world", description = "test workflow", version = "1")
-        ++> Activity("greet", "say hi", (fun _ -> printf "hello"; "my name is Yan"),
+        ++> Activity("greet", "say hi", greet,
                      60<sec>, 10<sec>, 10<sec>, 20<sec>)
-        ++> Activity("echo", "echo", (fun str -> printf "%s" str; ""),
+        ++> Activity("echo", "echo", echo,
                      60<sec>, 10<sec>, 10<sec>, 20<sec>)
         
     workflow.Start(client)
 
-    Console.ReadKey() |> ignore
+    while true do
+        Console.ReadKey() |> ignore
     0
