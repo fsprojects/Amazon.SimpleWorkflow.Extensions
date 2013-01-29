@@ -13,22 +13,28 @@ open SWF.Extensions.Core.Workflow
 let client = new AmazonSimpleWorkflowClient()
 
 let greet _ =
-    printf "hello"
+    printfn "hello"
     "my name is Yan"
 
 let echo str = 
-    printf "%s" str
+    printfn "%s" str
+    ""
+
+let bye _ =
+    printfn "good bye!"
     ""
 
 [<EntryPoint>]
 let main argv = 
     let workflow = 
-        Workflow(domain = "iwi", name = "hello_world", description = "test workflow", version = "1")
+        Workflow(domain = "iwi", name = "yc_test", description = "test workflow", version = "1")
         ++> Activity("greet", "say hi", greet, 60, 10, 10, 20)
         ++> Activity("echo", "echo", echo, 60, 10, 10, 20)
+        ++> Activity("bye", "say bye", bye, 60, 10, 10, 20)
         
+    workflow.Register(client)
     workflow.Start(client)
 
     while true do
-        Console.ReadKey() |> ignore
+        System.Threading.Thread.Sleep(1000)
     0
