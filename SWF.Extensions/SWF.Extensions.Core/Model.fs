@@ -6,9 +6,6 @@ open System.Collections.Generic
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Model
 
-[<Measure>]
-type sec      // seconds
-
 // #region type alias
 
 type ActivityId         = string
@@ -25,7 +22,7 @@ type Name               = string
 type Reason             = string
 type Result             = string
 type RunId              = string
-type Seconds            = int<sec>
+type Seconds            = int
 type SignalName         = string
 type SwfDecision        = Amazon.SimpleWorkflow.Model.Decision
 type TagList            = string[]
@@ -93,8 +90,8 @@ let inline (!?) x = asOption x
 
 let inline eventIdOp x = (int64 >> function | 0L -> None | x' -> Some x') x
 
-let inline secondsOp x = (int >> function | 0 -> None | x' -> Some <| LanguagePrimitives.Int32WithMeasure<sec> x') x
-let inline seconds x = (int >> LanguagePrimitives.Int32WithMeasure<sec>) x
+let inline secondsOp x = (int >> function | 0 -> None | x' -> Some x') x
+let inline seconds x = int x
 let inline timeout x = TimeoutType.op_Explicit x
 let inline childPolicy x = ChildPolicy.op_Explicit x
 

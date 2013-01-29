@@ -24,10 +24,8 @@ let echo str =
 let main argv = 
     let workflow = 
         Workflow(domain = "iwi", name = "hello_world", description = "test workflow", version = "1")
-        ++> Activity("greet", "say hi", greet,
-                     60<sec>, 10<sec>, 10<sec>, 20<sec>)
-        ++> Activity("echo", "echo", echo,
-                     60<sec>, 10<sec>, 10<sec>, 20<sec>)
+        ++> Activity("greet", "say hi", greet, 60, 10, 10, 20)
+        ++> Activity("echo", "echo", echo, 60, 10, 10, 20)
         
     workflow.Start(client)
 

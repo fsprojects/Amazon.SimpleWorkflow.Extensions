@@ -47,11 +47,16 @@ type Workflow (domain, name, description, version, ?taskList,
     do if nullOrWs domain then nullArg "domain"
     do if nullOrWs name   then nullArg "name"
 
-    let taskList = new TaskList(Name = defaultArg taskList (name + "TaskList"))
-    let activities = defaultArg activities []
-    let stages = activities 
+    let onDecisionTaskError = new Event<Exception>()
+    let onActivityTaskError = new Event<Exception>()
 
-                 |> List.mapi (fun i activity -> { Id = i; Action = ScheduleActivity activity; Version = sprintf "%s.%d" name i })
+    let taskList = new TaskList(Name = defaultArg taskList (name + "TaskList"))
+
+    let activities = defaultArg activities [] 
+    let stages = 
+        activities
+        |> List.rev
+        |> List.mapi (fun i activity -> { Id = i; Action = ScheduleActivity activity; Version = sprintf "%s.%d" name i })
 
     /// registers the workflow and activity types
     let register (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
@@ -122,21 +127,27 @@ type Workflow (domain, name, description, version, ?taskList,
 
     let decider (task : DecisionTask) = decide task.Events
 
-    let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decider, (fun _ -> ()))
+    let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decider, onDecisionTaskError.Trigger)
     let startActivityWorkers (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
         stages 
         |> List.choose (function | { Action = ScheduleActivity(activity) } -> Some activity | _ -> None)
         |> List.iter (fun activity -> 
             let heartbeat = TimeSpan.FromSeconds(float activity.TaskHeartbeatTimeout)
             ActivityWorker.Start(clt, domain, activity.TaskList.Name,
-                                 activity.Task, (fun _ -> ()), 
+                                 activity.Task, onActivityTaskError.Trigger, 
                                  heartbeat))
 
-    member private this.Attach(activity) = Workflow(domain, name, description, version, taskList.Name, 
-                                                    activity :: activities |> List.rev,
-                                                    ?taskStartToCloseTimeout = taskStartToCloseTimeout,
-                                                    ?execStartToCloseTimeout = execStartToCloseTimeout,
-                                                    ?childPolicy             = childPolicy)
+    member private this.Attach (activity) = Workflow(domain, name, description, version, taskList.Name, 
+                                                     activity :: activities,
+                                                     ?taskStartToCloseTimeout = taskStartToCloseTimeout,
+                                                     ?execStartToCloseTimeout = execStartToCloseTimeout,
+                                                     ?childPolicy             = childPolicy)        
+
+    [<CLIEvent>]
+    member this.OnDecisionTaskError = onDecisionTaskError.Publish
+
+    [<CLIEvent>]
+    member this.OnActivityTaskError = onActivityTaskError.Publish
 
     member this.Register swfClt = 
         // register the workflow type and activity types
@@ -147,3 +158,5 @@ type Workflow (domain, name, description, version, ?taskList,
         startActivityWorkers swfClt
 
     static member (++>) (workflow : Workflow, activity) = workflow.Attach(activity)
+
+    static member (+=>) (workflow : Workflow, activity) = workflow
