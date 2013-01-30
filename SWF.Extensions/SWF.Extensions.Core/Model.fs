@@ -37,6 +37,15 @@ exception UnknownTimeoutType of string
 exception UnknownEventType   of string
 exception UnknownChildPolicy of string
 
+type RegistrationStatus = 
+    | Registered
+    | Deprecated
+
+    override this.ToString() =
+        match this with
+        | Registered -> "REGISTERED"
+        | Deprecated -> "DEPRECATED"
+
 type ChildPolicy =
     | Terminate
     | RequestCancel

@@ -39,6 +39,15 @@ type Stage =
 module Helper =
     let nullOrWs = String.IsNullOrWhiteSpace
 
+[<RequireQualifiedAccess>]
+module HistoryEvents =
+    let rec getWorkflowInput (events : HistoryEvent list) = 
+        match events with
+        | []    -> None
+        | { EventType = WorkflowExecutionStarted(_, _, _, _, _, _, _, input, _, _) }::_ 
+                -> input
+        | _::tl -> getWorkflowInput tl
+
 type Workflow (domain, name, description, version, ?taskList, 
                ?activities              : Activity list,
                ?taskStartToCloseTimeout : Seconds,
@@ -60,10 +69,21 @@ type Workflow (domain, name, description, version, ?taskList,
 
     /// registers the workflow and activity types
     let register (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
-        let registerActivities stages =
-            stages 
-            |> List.choose (function | { Id = id; Action = ScheduleActivity(activity); Version = version } -> Some(id, activity, version) | _ -> None)
-            |> List.map (fun (id, activity, version) -> 
+        let registerActivities stages = async {
+            let req = ListActivityTypesRequest(Domain = domain).WithRegistrationStatus(string Registered)
+            let! res = clt.ListActivityTypesAsync(req)
+
+            let existing = res.ListActivityTypesResult.ActivityTypeInfos.TypeInfos
+                           |> Seq.map (fun info -> info.ActivityType.Name, info.ActivityType.Version)
+                           |> Set.ofSeq
+
+            let activities = stages 
+                             |> List.choose (function 
+                                | { Id = id; Action = ScheduleActivity(activity); Version = version } when not <| existing.Contains(activity.Name, version)
+                                    -> Some(id, activity, version) 
+                                | _ -> None)
+
+            for (id, activity, version) in activities do
                 let req = RegisterActivityTypeRequest(Domain = domain, Name = activity.Name)
                             .WithDescription(activity.Description)
                             .WithDefaultTaskList(activity.TaskList)
@@ -73,20 +93,27 @@ type Workflow (domain, name, description, version, ?taskList,
                             .WithDefaultTaskStartToCloseTimeout(str activity.TaskStartToCloseTimeout)
                             .WithDefaultTaskScheduleToCloseTimeout(str activity.TaskScheduleToCloseTimeout)
 
-                async { do! clt.RegisterActivityTypeAsync(req) |> Async.Ignore })
+                do! clt.RegisterActivityTypeAsync(req) |> Async.Ignore
+        }
 
-        let registerWorkflow () =
-            let req = RegisterWorkflowTypeRequest(Domain = domain, Name = name)
-                        .WithDescription(description)
-                        .WithVersion(version)
-                        .WithDefaultTaskList(taskList)
-            taskStartToCloseTimeout ?-> (str >> req.WithDefaultTaskStartToCloseTimeout)
-            execStartToCloseTimeout ?-> (str >> req.WithDefaultExecutionStartToCloseTimeout)
-            childPolicy             ?-> (str >> req.WithDefaultChildPolicy)
+        let registerWorkflow () = async {
+            let req = ListWorkflowTypesRequest(Domain = domain, Name = name).WithRegistrationStatus(string Registered)
+            let! res = clt.ListWorkflowTypesAsync(req)
 
-            async { do! clt.RegisterWorkflowTypeAsync(req) |> Async.Ignore }
+            // only register the workflow if it doesn't exist already
+            if res.ListWorkflowTypesResult.WorkflowTypeInfos.TypeInfos.Count = 0 then
+                let req = RegisterWorkflowTypeRequest(Domain = domain, Name = name)
+                            .WithDescription(description)
+                            .WithVersion(version)
+                            .WithDefaultTaskList(taskList)
+                taskStartToCloseTimeout ?-> (str >> req.WithDefaultTaskStartToCloseTimeout)
+                execStartToCloseTimeout ?-> (str >> req.WithDefaultExecutionStartToCloseTimeout)
+                childPolicy             ?-> (str >> req.WithDefaultChildPolicy)
 
-        seq { yield! registerActivities stages; yield registerWorkflow() }
+                do! clt.RegisterWorkflowTypeAsync(req) |> Async.Ignore
+        }
+
+        seq { yield registerActivities stages; yield registerWorkflow() }
         |> Async.Parallel
         |> Async.RunSynchronously
 
@@ -114,18 +141,20 @@ type Workflow (domain, name, description, version, ?taskList,
                   [| decision |], ""
         | None -> [| CompleteWorkflowExecution None |], ""
 
-    let rec decide (events : HistoryEvent list) =
+    let rec decide (events : HistoryEvent list) input =
         match events with
-        | [] -> scheduleStage 0 None
+        | [] -> scheduleStage 0 input
         | { EventType = ActivityTaskCompleted(scheduledEvtId, _, result) }::tl ->
             // find the event for when the activity was scheduled
             let (ActivityTaskScheduled(activityId, _, _, _, _, _, _, _, _, _)) = getEventType scheduledEvtId tl
             
             // schedule the next stage in the workflow
             scheduleStage (int activityId + 1) result
-        | hd::tl -> decide tl
+        | hd::tl -> decide tl input
 
-    let decider (task : DecisionTask) = decide task.Events
+    let decider (task : DecisionTask) = 
+        let input = HistoryEvents.getWorkflowInput task.Events
+        decide task.Events input
 
     let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decider, onDecisionTaskError.Trigger)
     let startActivityWorkers (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
@@ -149,14 +178,9 @@ type Workflow (domain, name, description, version, ?taskList,
     [<CLIEvent>]
     member this.OnActivityTaskError = onActivityTaskError.Publish
 
-    member this.Register swfClt = 
-        // register the workflow type and activity types
-        register swfClt |> ignore
-
     member this.Start swfClt = 
+        register swfClt |> ignore
         startDecisionWorker  swfClt
         startActivityWorkers swfClt
 
     static member (++>) (workflow : Workflow, activity) = workflow.Attach(activity)
-
-    static member (+=>) (workflow : Workflow, activity) = workflow
