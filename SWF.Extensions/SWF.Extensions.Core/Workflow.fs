@@ -7,6 +7,24 @@ open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Model
 
 open SWF.Extensions.Core.Model
+    
+[<AutoOpen>]
+module Helper =
+    let nullOrWs = String.IsNullOrWhiteSpace
+
+[<RequireQualifiedAccess>]
+module HistoryEvents =
+    /// Returns the input to the workflow from the list of events
+    let rec getWorkflowInput = function
+        | []    -> None
+        | { EventType = WorkflowExecutionStarted(_, _, _, _, _, _, _, input, _, _) }::_ 
+                -> input
+        | _::tl -> getWorkflowInput tl
+
+    /// Returns the event type associated with the specified Event ID
+    let rec getEventTypeById eventId = function
+        | { EventId = eventId'; EventType = eventType }::tl when eventId = eventId' -> eventType
+        | hd::tl -> getEventTypeById eventId tl
 
 type Activity (name, description : string, task : string -> string, 
                taskHeartbeatTimeout        : Seconds,
@@ -25,34 +43,22 @@ type Activity (name, description : string, task : string -> string,
     member this.TaskStartToCloseTimeout     = taskStartToCloseTimeout
     member this.TaskScheduleToCloseTimeout  = taskScheduleToCloseTimeout
 
-type StageAction = 
-    | ScheduleActivity  of Activity
+and StageAction = 
+    | ScheduleActivity      of Activity
+    | StartChildWorkflow    of Workflow
 
-type Stage =
+and Stage =
     {
         Id      : int
         Action  : StageAction
         Version : string
     }
-    
-[<AutoOpen>]
-module Helper =
-    let nullOrWs = String.IsNullOrWhiteSpace
 
-[<RequireQualifiedAccess>]
-module HistoryEvents =
-    let rec getWorkflowInput (events : HistoryEvent list) = 
-        match events with
-        | []    -> None
-        | { EventType = WorkflowExecutionStarted(_, _, _, _, _, _, _, input, _, _) }::_ 
-                -> input
-        | _::tl -> getWorkflowInput tl
-
-type Workflow (domain, name, description, version, ?taskList, 
-               ?activities              : Activity list,
-               ?taskStartToCloseTimeout : Seconds,
-               ?execStartToCloseTimeout : Seconds,
-               ?childPolicy             : ChildPolicy) =
+and Workflow (domain, name, description, version, ?taskList, 
+              ?stages                  : Stage list,
+              ?taskStartToCloseTimeout : Seconds,
+              ?execStartToCloseTimeout : Seconds,
+              ?childPolicy             : ChildPolicy) =
     do if nullOrWs domain then nullArg "domain"
     do if nullOrWs name   then nullArg "name"
 
@@ -61,11 +67,12 @@ type Workflow (domain, name, description, version, ?taskList,
 
     let taskList = new TaskList(Name = defaultArg taskList (name + "TaskList"))
 
-    let activities = defaultArg activities [] 
-    let stages = 
-        activities
-        |> List.rev
-        |> List.mapi (fun i activity -> { Id = i; Action = ScheduleActivity activity; Version = sprintf "%s.%d" name i })
+    // sort the stages by Id
+    let stages = defaultArg stages [] |> List.sortBy (fun { Id = id } -> id)
+//    let stages =
+//        activities
+//        |> List.rev
+//        |> List.mapi (fun i activity -> { Id = i; Action = ScheduleActivity activity; Version = sprintf "%s.%d" name i })
 
     /// registers the workflow and activity types
     let register (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
@@ -117,11 +124,6 @@ type Workflow (domain, name, description, version, ?taskList,
         |> Async.Parallel
         |> Async.RunSynchronously
 
-    /// recursively tries to get the history event with the specified event Id
-    let rec getEventType eventId = function
-        | { EventId = eventId'; EventType = eventType }::tl when eventId = eventId' -> eventType
-        | hd::tl -> getEventType eventId tl
-
     /// tries to get the nth (zero-index) stage
     let getStage n = if n >= stages.Length then None else List.nth stages n |> Some
 
@@ -139,17 +141,38 @@ type Workflow (domain, name, description, version, ?taskList,
                                                       Some activity.TaskScheduleToCloseTimeout,
                                                       None)
                   [| decision |], ""
-        | None -> [| CompleteWorkflowExecution None |], ""
+        | Some({ Id = id; Action = StartChildWorkflow(workflow) }) 
+               -> let workflowType = WorkflowType(Name = workflow.Name, Version = workflow.Version)
+                  let decision = StartChildWorkflowExecution(str id, workflowType,
+                                                             workflow.ChildPolicy,
+                                                             Some workflow.TaskList, 
+                                                             input,
+                                                             None,
+                                                             workflow.ExecutionStartToCloseTimeout,
+                                                             workflow.TaskStartToCloseTimeout,                                                             
+                                                             Some(string id))
+                  [| decision |], ""
+        | None -> [| CompleteWorkflowExecution input |], ""
 
     let rec decide (events : HistoryEvent list) input =
         match events with
         | [] -> scheduleStage 0 input
         | { EventType = ActivityTaskCompleted(scheduledEvtId, _, result) }::tl ->
             // find the event for when the activity was scheduled
-            let (ActivityTaskScheduled(activityId, _, _, _, _, _, _, _, _, _)) = getEventType scheduledEvtId tl
+            let (ActivityTaskScheduled(activityId, _, _, _, _, _, _, _, _, _)) = HistoryEvents.getEventTypeById scheduledEvtId tl
             
             // schedule the next stage in the workflow
             scheduleStage (int activityId + 1) result
+        | { EventType = ChildWorkflowExecutionCompleted(initiatedEvtId, _, workflowExec, _, result) }::tl ->            
+            // find the event for when the child workflow was started
+            let (StartChildWorkflowExecutionInitiated(_, _, _, _, _, _, _, control, _, _)) = HistoryEvents.getEventTypeById initiatedEvtId tl
+
+            // schedule the next stage in the workflow
+            let (Some(stageId)) = control            
+            scheduleStage (int stageId + 1) result
+        | { EventType = StartChildWorkflowExecutionInitiated _ }::tl ->
+            // we're still waiting for a child workflow to finish, do nothing for now
+            [||], ""
         | hd::tl -> decide tl input
 
     let decider (task : DecisionTask) = 
@@ -166,11 +189,14 @@ type Workflow (domain, name, description, version, ?taskList,
                                  activity.Task, onActivityTaskError.Trigger, 
                                  heartbeat))
 
-    member private this.Attach (activity) = Workflow(domain, name, description, version, taskList.Name, 
-                                                     activity :: activities,
-                                                     ?taskStartToCloseTimeout = taskStartToCloseTimeout,
-                                                     ?execStartToCloseTimeout = execStartToCloseTimeout,
-                                                     ?childPolicy             = childPolicy)        
+    member private this.Append (toAction : 'a -> StageAction, item : 'a) = 
+        let id = stages.Length
+        let stage = { Id = id; Action = toAction item; Version = sprintf "%s.%d" name id }
+        Workflow(domain, name, description, version, taskList.Name, 
+                 stage :: stages,
+                 ?taskStartToCloseTimeout = taskStartToCloseTimeout,
+                 ?execStartToCloseTimeout = execStartToCloseTimeout,
+                 ?childPolicy             = childPolicy)         
 
     [<CLIEvent>]
     member this.OnDecisionTaskError = onDecisionTaskError.Publish
@@ -178,9 +204,28 @@ type Workflow (domain, name, description, version, ?taskList,
     [<CLIEvent>]
     member this.OnActivityTaskError = onActivityTaskError.Publish
 
+    member this.Name                         = name
+    member this.Version                      = version
+    member this.TaskList                     = taskList
+    member this.TaskStartToCloseTimeout      = taskStartToCloseTimeout
+    member this.ExecutionStartToCloseTimeout = execStartToCloseTimeout
+    member this.ChildPolicy                  = childPolicy
+    member this.NumberOfStages               = stages.Length
+
     member this.Start swfClt = 
         register swfClt |> ignore
         startDecisionWorker  swfClt
         startActivityWorkers swfClt
 
-    static member (++>) (workflow : Workflow, activity) = workflow.Attach(activity)
+        // start any child workflows
+        stages 
+        |> List.choose (function | { Action = StartChildWorkflow(workflow) } -> Some workflow | _ -> None)
+        |> List.iter (fun workflow -> workflow.Start swfClt)
+
+    static member (++>) (workflow : Workflow, activity : Activity) = workflow.Append(ScheduleActivity, activity)
+    static member (++>) (workflow : Workflow, childWorkflow : Workflow) = 
+        if childWorkflow.ExecutionStartToCloseTimeout.IsNone then failwithf "child workflows must specify execution timeout"
+        if childWorkflow.TaskStartToCloseTimeout.IsNone then failwithf "child workflows must specify decision task timeout"
+        if childWorkflow.ChildPolicy.IsNone then failwithf "child workflows must specify child policy"
+
+        workflow.Append(StartChildWorkflow, childWorkflow)

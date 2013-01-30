@@ -18,18 +18,29 @@ let greet name =
 
 let echo str = 
     printfn "%s" str
+    "hi, this is the child workflow"
+
+let bye name =
+    printfn "good bye! %s" name
     ""
 
-let bye _ =
-    printfn "good bye!"
-    ""
+let childEcho str =
+    printfn "%s" str
+    "child workflow"
 
 [<EntryPoint>]
 let main argv = 
+    let childWorkflow = 
+        Workflow(domain = "iwi", name = "test_child_workflow", description = "test child workflow", version = "1",
+                 execStartToCloseTimeout = 600, taskStartToCloseTimeout = 300,
+                 childPolicy = ChildPolicy.Terminate)
+        ++> Activity("child_echo", "child echos", childEcho, 60, 10, 10, 20)
+
     let workflow = 
         Workflow(domain = "iwi", name = "test_workflow", description = "test workflow", version = "1")
         ++> Activity("greet", "say hi", greet, 60, 10, 10, 20)
         ++> Activity("echo", "echo", echo, 60, 10, 10, 20)
+        ++> childWorkflow
         ++> Activity("bye", "say bye", bye, 60, 10, 10, 20)
         
     workflow.Start(client)
