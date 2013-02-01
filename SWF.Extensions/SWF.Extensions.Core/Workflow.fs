@@ -151,7 +151,22 @@ and Workflow (domain, name, description, version, ?taskList,
                 do! clt.RegisterWorkflowTypeAsync(req) |> Async.Ignore
         }
 
-        seq { yield registerActivities stages; yield registerWorkflow() }
+        let registerDomain () = async {
+            let req = ListDomainsRequest().WithRegistrationStatus(string Registered)
+            let! res = clt.ListDomainsAsync(req)
+
+            // only register the domain if it doesn't exist already
+            let exists = res.ListDomainsResult.DomainInfos.Name |> Seq.exists (fun info -> info.Name = domain)
+            if not <| exists then
+                let req = RegisterDomainRequest(Name = domain)
+                            .WithWorkflowExecutionRetentionPeriodInDays(string Constants.maxWorkflowExecRetentionPeriodInDays)
+                do! clt.RegisterDomainAsync(req) |> Async.Ignore
+        }
+
+        // run the domain registration first, otherwise the activities and workflow registrations will fail!
+        registerDomain() |> Async.RunSynchronously
+
+        seq { yield registerActivities stages; yield registerWorkflow();  }
         |> Async.Parallel
         |> Async.RunSynchronously
 

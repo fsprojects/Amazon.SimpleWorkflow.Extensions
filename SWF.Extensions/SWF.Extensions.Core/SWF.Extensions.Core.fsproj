@@ -41,6 +41,7 @@
   <ItemGroup>
     <Compile Include="Ext.fs" />
     <Compile Include="Model.fs" />
+    <Compile Include="Constants.fs" />
     <Compile Include="Workers.fs" />
     <Compile Include="Workflow.fs" />
     <None Include="packages.config" />
