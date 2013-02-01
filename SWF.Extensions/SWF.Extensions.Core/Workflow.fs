@@ -93,7 +93,8 @@ and Workflow (domain, name, description, version, ?taskList,
               ?stages                  : Stage list,
               ?taskStartToCloseTimeout : Seconds,
               ?execStartToCloseTimeout : Seconds,
-              ?childPolicy             : ChildPolicy) =
+              ?childPolicy             : ChildPolicy,
+              ?identity                : Identity) =
     do if nullOrWs domain then nullArg "domain"
     do if nullOrWs name   then nullArg "name"
 
@@ -225,15 +226,13 @@ and Workflow (domain, name, description, version, ?taskList,
         let input = HistoryEvents.getWorkflowInput task.Events
         decide task.Events input
 
-    let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decider, onDecisionTaskError.Trigger)
+    let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decider, onDecisionTaskError.Trigger, ?identity = identity)
     let startActivityWorkers (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
         stages 
         |> List.choose (function | { Action = ScheduleActivity(activity) } -> Some activity | _ -> None)
         |> List.iter (fun activity -> 
             let heartbeat = TimeSpan.FromSeconds(float activity.TaskHeartbeatTimeout)
-            ActivityWorker.Start(clt, domain, activity.TaskList.Name,
-                                 activity.Process, onActivityTaskError.Trigger, 
-                                 heartbeat))
+            ActivityWorker.Start(clt, domain, activity.TaskList.Name, activity.Process, onActivityTaskError.Trigger, heartbeat, ?identity = identity))
 
     member private this.Append (toAction : 'a -> StageAction, item : 'a) = 
         let id = stages.Length
@@ -242,7 +241,8 @@ and Workflow (domain, name, description, version, ?taskList,
                  stage :: stages,
                  ?taskStartToCloseTimeout = taskStartToCloseTimeout,
                  ?execStartToCloseTimeout = execStartToCloseTimeout,
-                 ?childPolicy             = childPolicy)         
+                 ?childPolicy             = childPolicy,
+                 ?identity                = identity)         
 
     [<CLIEvent>]
     member this.OnDecisionTaskError = onDecisionTaskError.Publish

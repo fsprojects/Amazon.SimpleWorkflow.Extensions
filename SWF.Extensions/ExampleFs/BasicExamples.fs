@@ -13,7 +13,8 @@ let sayHelloWorld _ = printfn "Hello World!"; ""
 let helloWorldWorkflow =
     Workflow(domain = "theburningmonk.com", name = "hello_world", 
              description = "simple 'hello world' example", 
-             version = "1")
+             version = "1",
+             identity = "Phantom") // you can optionally set the identity of your decision and activity workers
     ++> Activity("say_hello_world", "say 'hello world'", sayHelloWorld,
                  taskHeartbeatTimeout       = 60, 
                  taskScheduleToStartTimeout = 10,

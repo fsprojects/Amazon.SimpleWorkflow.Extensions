@@ -16,6 +16,7 @@ type Details            = string
 type Domain             = string
 type EventId            = int64
 type ExecutionContext   = string
+type Identity           = string
 type Input              = string
 type MarkerName         = string
 type Name               = string
@@ -28,7 +29,6 @@ type SwfDecision        = Amazon.SimpleWorkflow.Model.Decision
 type TagList            = string[]
 type TimerId            = string
 type Version            = string
-type WorkerId           = string
 type WorkflowId         = string
 
 // #endregion
@@ -306,7 +306,7 @@ type EventType =
     // ActivityTaskStarted args:
     //      scheduled event Id
     //      identity of the worker assigned the task
-    | ActivityTaskStarted               of EventId * WorkerId option
+    | ActivityTaskStarted               of EventId * Identity option
     // ActivityTaskTimedOut args:
     //      scheduled event Id
     //      started event Id
@@ -381,8 +381,8 @@ type EventType =
     | DecisionTaskScheduled             of TaskList * Seconds option
     // DecisionTaskStarted args:
     //      scheduled event Id
-    //      id of the worker assigned
-    | DecisionTaskStarted               of EventId * WorkerId option
+    //      identity of the worker assigned
+    | DecisionTaskStarted               of EventId * Identity option
     // DecisionTaskTimedOut args:
     //      scheduled event Id
     //      started event Id

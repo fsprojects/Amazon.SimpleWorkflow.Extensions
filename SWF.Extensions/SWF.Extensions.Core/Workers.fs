@@ -20,6 +20,7 @@ type DecisionWorker private (
                                 tasklist     : string,                             
                                 decide       : DecisionTask -> Decision[] * string, // function that makes the decisions based on task, and a new execution context
                                 onExn        : Exception -> unit,                   // function that handles exceptions
+                                ?identity    : Identity,                            // identity of the worker (e.g. instance ID, IP, etc.)
                                 ?concurrency : int                                  // the number of concurrent workers
                              ) = 
     let concurrency = defaultArg concurrency 1
@@ -27,7 +28,10 @@ type DecisionWorker private (
     let handler = async {
         while true do
             try
-                let pollReq = PollForDecisionTaskRequest(Domain = domain, TaskList = TaskList(Name = tasklist), ReverseOrder = true)
+                let pollReq = PollForDecisionTaskRequest(Domain = domain, ReverseOrder = true)
+                                    .WithTaskList(TaskList(Name = tasklist))
+                pollReq.WithIdentity    <-? identity
+
                 let! pollRes = clt.PollForDecisionTaskAsync(pollReq)
                 let task = DecisionTask(pollRes.PollForDecisionTaskResult.DecisionTask)
 
@@ -44,7 +48,7 @@ type DecisionWorker private (
 
     do seq { 1..concurrency } |> Seq.iter (fun _ -> Async.Start handler)
     
-    /// Starts a decision worker with C# lambdas
+    /// Starts a decision worker with C# lambdas with minimal set of inputs
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
@@ -53,15 +57,16 @@ type DecisionWorker private (
         let decide, onExn = (fun t -> decide.Invoke(t)), (fun exn -> onExn.Invoke(exn))
         DecisionWorker(clt, domain, tasklist, decide, onExn) |> ignore
     
-    /// Starts a decision worker with C# lambdas, and specifies the level of concurrency to use
+    /// Starts a decision worker with C# lambdas with greedy set of inputs
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
                         decide          : Func<DecisionTask, Decision[] * string>,
                         onExn           : Action<Exception>,
+                        identity        : Identity,
                         concurrency     : int) =
         let decide, onExn = (fun t -> decide.Invoke(t)), (fun exn -> onExn.Invoke(exn))
-        DecisionWorker(clt, domain, tasklist, decide, onExn, concurrency) |> ignore
+        DecisionWorker(clt, domain, tasklist, decide, onExn, identity, concurrency) |> ignore
 
     /// Starts a decision worker with F# functions, optionally specifying the level of concurrency to use
     static member Start(clt             : AmazonSimpleWorkflowClient,
@@ -69,8 +74,9 @@ type DecisionWorker private (
                         tasklist        : string,                        
                         decide          : DecisionTask -> Decision[] * string,
                         onExn           : Exception -> unit,
+                        ?identity       : Identity,
                         ?concurrency    : int) =
-        DecisionWorker(clt, domain, tasklist, decide, onExn, ?concurrency = concurrency) |> ignore
+        DecisionWorker(clt, domain, tasklist, decide, onExn, ?identity = identity, ?concurrency = concurrency) |> ignore
 
 /// Encapsulates the work an activity worker performs (i.e. taking an activity task and doing something with it).
 /// This class handles the boilerplate of:
@@ -86,6 +92,7 @@ type ActivityWorker private (
                                 work            : string -> string,            // function that performs the activity and returns its result
                                 onExn           : Exception -> unit,           // function that handles exceptions
                                 ?heartbeatFreq  : TimeSpan,                    // how frequently we should respond with a heartbeat
+                                ?identity       : Identity,                    // identity of the worker (e.g. instance ID, IP, etc.)                                
                                 ?concurrency    : int                          // the number of concurrent workers                                
                             ) =
     let heartbeatFreq = defaultArg heartbeatFreq (TimeSpan.FromMinutes 1.0)
@@ -93,9 +100,12 @@ type ActivityWorker private (
 
     // function to poll for activity tasks to perform
     let pollTask () = async {
-        let pollReq = PollForActivityTaskRequest(Domain = domain, TaskList = TaskList(Name = tasklist))
-        let! pollRes = clt.PollForActivityTaskAsync(pollReq)
-        return pollRes.PollForActivityTaskResult.ActivityTask
+        let req = PollForActivityTaskRequest(Domain = domain)
+                        .WithTaskList(TaskList(Name = tasklist))
+        req.WithIdentity    <-? identity
+
+        let! res = clt.PollForActivityTaskAsync(req)
+        return res.PollForActivityTaskResult.ActivityTask
     }
 
     // function to record heartbeats periodically
@@ -124,7 +134,7 @@ type ActivityWorker private (
                 let req = RespondActivityTaskFailedRequest()
                             .WithTaskToken(task.TaskToken)
                             .WithReason(exn.Message)
-                            .WithDetails(exn.StackTrace)                        
+                            .WithDetails(exn.StackTrace)
                 do! clt.RespondActivityTaskFailedAsync(req) |> Async.Ignore
                 cts.Dispose()
         }
@@ -148,7 +158,7 @@ type ActivityWorker private (
 
     do seq { 1..concurrency } |> Seq.iter (fun _ -> Async.Start start)
 
-    /// Starts an activity worker with C# lambdas
+    /// Starts an activity worker with C# lambdas with minimal set of inputs
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
@@ -156,16 +166,6 @@ type ActivityWorker private (
                         onExn           : Action<Exception>) =
         let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
         ActivityWorker(clt, domain, tasklist, work, onExn) |> ignore
-
-    /// Starts an activity worker with C# lambdas, and specifies the level of concurrency to use
-    static member Start(clt             : AmazonSimpleWorkflowClient,
-                        domain          : string,
-                        tasklist        : string,                        
-                        work            : Func<string, string>,
-                        onExn           : Action<Exception>,
-                        concurrency     : int) =
-        let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
-        ActivityWorker(clt, domain, tasklist, work, onExn, ?concurrency = Some concurrency) |> ignore
 
     /// Starts an activity worker with C# lambdas, and specifies the heart beat frequency to use
     static member Start(clt             : AmazonSimpleWorkflowClient,
@@ -177,17 +177,17 @@ type ActivityWorker private (
         let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
         ActivityWorker(clt, domain, tasklist, work, onExn, ?heartbeatFreq = Some heartbeatFreq) |> ignore
 
-    /// Starts an activity worker with C# lambdas, and specifies the heart beat frequency and level 
-    /// of concurrency to use
+    /// Starts an activity worker with C# lambdas with greedy set of inputs
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
                         work            : Func<string, string>,
                         onExn           : Action<Exception>,
                         heartbeatFreq   : TimeSpan,
+                        identity        : Identity,                        
                         concurrency     : int) =
         let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
-        ActivityWorker(clt, domain, tasklist, work, onExn, heartbeatFreq, concurrency) |> ignore
+        ActivityWorker(clt, domain, tasklist, work, onExn, heartbeatFreq, identity, concurrency) |> ignore
 
     /// Starts an activity worker with F# functions
     static member Start(clt             : AmazonSimpleWorkflowClient,
@@ -196,5 +196,6 @@ type ActivityWorker private (
                         work            : string -> string,
                         onExn           : Exception -> unit,
                         ?heartbeatFreq  : TimeSpan,
+                        ?identity       : Identity,                        
                         ?concurrency    : int) =
-        ActivityWorker(clt, domain, tasklist, work, onExn, ?heartbeatFreq = heartbeatFreq, ?concurrency = concurrency) |> ignore
+        ActivityWorker(clt, domain, tasklist, work, onExn, ?heartbeatFreq = heartbeatFreq, ?identity = identity, ?concurrency = concurrency) |> ignore
