@@ -1,17 +1,13 @@
-﻿module SWF.Extensions.Core.Workflow
+﻿namespace Amazon.SimpleWorkflow.Extensions
 
 open System
 
 open Amazon.SimpleWorkflow
-open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Model
 open ServiceStack.Text
 
-open SWF.Extensions.Core.Model
-    
-[<AutoOpen>]
-module Helper =
-    let nullOrWs = String.IsNullOrWhiteSpace
+open Amazon.SimpleWorkflow.Extensions
+open Amazon.SimpleWorkflow.Extensions.Model
 
 [<RequireQualifiedAccess>]
 module HistoryEvents =
@@ -36,18 +32,24 @@ type IActivity =
     abstract member TaskScheduleToStartTimeout  : Seconds
     abstract member TaskStartToCloseTimeout     : Seconds
     abstract member TaskScheduleToCloseTimeout  : Seconds
+    abstract member MaxRetries                  : int
 
     /// Processes a string input and returns the result
     abstract member Process     : string -> string
 
+/// Represents an activity, which in essence, is a function that takes some input and 
+/// returns some output
 type Activity<'TInput, 'TOutput>(name, description, 
                                  processor                   : 'TInput -> 'TOutput,
                                  taskHeartbeatTimeout        : Seconds,
                                  taskScheduleToStartTimeout  : Seconds,
                                  taskStartToCloseTimeout     : Seconds,
                                  taskScheduleToCloseTimeout  : Seconds,
-                                 ?taskList) =
-    let taskList = defaultArg taskList (name + "TaskList")
+                                 ?taskList,
+                                 ?maxRetries) =
+    let taskList   = defaultArg taskList (name + "TaskList")
+    let maxRetries = defaultArg maxRetries 0    // by default, don't retry at all
+
     let inputSerializer  = JsonSerializer<'TInput>()
     let outputSerializer = JsonSerializer<'TOutput>()
 
@@ -73,15 +75,18 @@ type Activity<'TInput, 'TOutput>(name, description,
         member this.TaskScheduleToStartTimeout  = taskScheduleToStartTimeout
         member this.TaskStartToCloseTimeout     = taskStartToCloseTimeout
         member this.TaskScheduleToCloseTimeout  = taskScheduleToCloseTimeout
+        member this.MaxRetries                  = maxRetries
 
         member this.Process (input)             = processor input
 
 type Activity = Activity<string, string>
 
+/// The different actions that can be taken as a stage in the workflow
 and StageAction = 
     | ScheduleActivity      of IActivity
     | StartChildWorkflow    of Workflow
 
+/// Represents a stage in the workflow
 and Stage =
     {
         Id      : int
@@ -100,6 +105,9 @@ and Workflow (domain, name, description, version, ?taskList,
 
     let onDecisionTaskError = new Event<Exception>()
     let onActivityTaskError = new Event<Exception>()
+    let onActivityFailed    = new Event<Domain * Name * ActivityId * Details option * Reason option>()
+    let onWorkflowFailed    = new Event<Domain * Name * RunId * Details option * Reason option>()
+    let onWorkflowCompleted = new Event<Domain * Name * RunId>()
 
     let taskList = new TaskList(Name = defaultArg taskList (name + "TaskList"))
 
@@ -244,11 +252,15 @@ and Workflow (domain, name, description, version, ?taskList,
                  ?childPolicy             = childPolicy,
                  ?identity                = identity)         
 
-    [<CLIEvent>]
-    member this.OnDecisionTaskError = onDecisionTaskError.Publish
+    // #region public Events
 
-    [<CLIEvent>]
-    member this.OnActivityTaskError = onActivityTaskError.Publish
+    [<CLIEvent>] member this.OnDecisionTaskError = onDecisionTaskError.Publish
+    [<CLIEvent>] member this.OnActivityTaskError = onActivityTaskError.Publish
+    [<CLIEvent>] member this.OnActivityFailed    = onActivityFailed.Publish
+    [<CLIEvent>] member this.OnWorkflowFailed    = onWorkflowFailed.Publish
+    [<CLIEvent>] member this.OnWorkflowCompleted = onWorkflowCompleted.Publish
+
+    // #endregion
 
     member this.Name                         = name
     member this.Version                      = version
@@ -268,6 +280,8 @@ and Workflow (domain, name, description, version, ?taskList,
         |> List.choose (function | { Action = StartChildWorkflow(workflow) } -> Some workflow | _ -> None)
         |> List.iter (fun workflow -> workflow.Start swfClt)
 
+    // #region Operators
+
     static member (++>) (workflow : Workflow, activity : IActivity) = workflow.Append(ScheduleActivity, activity)
     static member (++>) (workflow : Workflow, childWorkflow : Workflow) = 
         if childWorkflow.ExecutionStartToCloseTimeout.IsNone then failwithf "child workflows must specify execution timeout"
@@ -275,3 +289,5 @@ and Workflow (domain, name, description, version, ?taskList,
         if childWorkflow.ChildPolicy.IsNone then failwithf "child workflows must specify child policy"
 
         workflow.Append(StartChildWorkflow, childWorkflow)
+
+    // #endregion

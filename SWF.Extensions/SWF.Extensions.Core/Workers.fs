@@ -4,10 +4,10 @@ open System
 open System.Threading
 
 open Amazon.SimpleWorkflow
-open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Model
 
-open SWF.Extensions.Core.Model
+open Amazon.SimpleWorkflow.Extensions
+open Amazon.SimpleWorkflow.Extensions.Model
 
 /// Encapsulates the work a decision worker performs (i.e. take a decision task and make some decisions).
 /// This class handles the boilerplate of: 

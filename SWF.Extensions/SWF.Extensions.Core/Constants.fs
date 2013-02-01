@@ -1,4 +1,4 @@
-﻿namespace SWF.Extensions.Core
+﻿namespace Amazon.SimpleWorkflow.Extensions
 
 module Constants =
     // see http://docs.aws.amazon.com/amazonswf/latest/apireference/API_RegisterDomain.html
