@@ -2,8 +2,8 @@
 
 open System
 
-open SWF.Extensions.Core.Model
-open SWF.Extensions.Core.Workflow
+open Amazon.SimpleWorkflow.Extensions
+open Amazon.SimpleWorkflow.Extensions.Model
 
 // #region Hello World example
 

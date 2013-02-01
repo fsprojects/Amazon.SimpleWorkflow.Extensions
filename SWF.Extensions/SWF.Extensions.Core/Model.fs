@@ -70,6 +70,13 @@ type TimeoutType =
     | ScheduleToClose
     | Heartbeat
 
+    override this.ToString() =
+        match this with
+        | StartToClose      -> "START_TO_CLOSE"
+        | ScheduleToStart   -> "SCHEDULE_TO_START"
+        | ScheduleToClose   -> "SCHEDULE_TO_CLOSE"
+        | Heartbeat         -> "HEARTBEAT"
+
     static member op_Explicit = function
         | "START_TO_CLOSE"      -> StartToClose
         | "SCHEDULE_TO_START"   -> ScheduleToStart
