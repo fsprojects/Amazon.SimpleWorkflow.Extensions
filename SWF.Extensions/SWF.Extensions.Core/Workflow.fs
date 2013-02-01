@@ -5,6 +5,7 @@ open System
 open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Model
+open ServiceStack.Text
 
 open SWF.Extensions.Core.Model
     
@@ -26,25 +27,59 @@ module HistoryEvents =
         | { EventId = eventId'; EventType = eventType }::tl when eventId = eventId' -> eventType
         | hd::tl -> getEventTypeById eventId tl
 
-type Activity (name, description : string, task : string -> string, 
-               taskHeartbeatTimeout        : Seconds,
-               taskScheduleToStartTimeout  : Seconds,
-               taskStartToCloseTimeout     : Seconds,
-               taskScheduleToCloseTimeout  : Seconds,
-               ?taskList) = 
+// Represents an activity
+type IActivity =
+    abstract member Name        : string
+    abstract member Description : string
+    abstract member TaskList    : TaskList    
+    abstract member TaskHeartbeatTimeout        : Seconds
+    abstract member TaskScheduleToStartTimeout  : Seconds
+    abstract member TaskStartToCloseTimeout     : Seconds
+    abstract member TaskScheduleToCloseTimeout  : Seconds
+
+    /// Processes a string input and returns the result
+    abstract member Process     : string -> string
+
+type Activity<'TInput, 'TOutput>(name, description, 
+                                 processor                   : 'TInput -> 'TOutput,
+                                 taskHeartbeatTimeout        : Seconds,
+                                 taskScheduleToStartTimeout  : Seconds,
+                                 taskStartToCloseTimeout     : Seconds,
+                                 taskScheduleToCloseTimeout  : Seconds,
+                                 ?taskList) =
     let taskList = defaultArg taskList (name + "TaskList")
+    let inputSerializer  = JsonSerializer<'TInput>()
+    let outputSerializer = JsonSerializer<'TOutput>()
+
+    // use Json serializer to marshall the input and output from-and-to string
+    let processor = inputSerializer.DeserializeFromString >> processor >> outputSerializer.SerializeToString
     
-    member this.Name                        = name
-    member this.Description                 = description
-    member this.Task                        = task
-    member this.TaskList                    = TaskList(Name = taskList)
-    member this.TaskHeartbeatTimeout        = taskHeartbeatTimeout
-    member this.TaskScheduleToStartTimeout  = taskScheduleToStartTimeout
-    member this.TaskStartToCloseTimeout     = taskStartToCloseTimeout
-    member this.TaskScheduleToCloseTimeout  = taskScheduleToCloseTimeout
+    // C# friendly constructor which takes in a Func instead of function
+    new(name, description, processor : Func<'TInput, 'TOutput>,
+        taskHeartbeatTimeout, taskScheduleToStartTimeout, taskStartToCloseTimeout, taskScheduleToCloseTimeout,
+        ?taskList) = 
+            Activity<'TInput, 'TOutput>(name, description, (fun input -> processor.Invoke(input)),
+                                        taskHeartbeatTimeout,
+                                        taskScheduleToStartTimeout,
+                                        taskStartToCloseTimeout,
+                                        taskScheduleToCloseTimeout,
+                                        ?taskList = taskList)
+
+    interface IActivity with
+        member this.Name                        = name
+        member this.Description                 = description
+        member this.TaskList                    = TaskList(Name = taskList)
+        member this.TaskHeartbeatTimeout        = taskHeartbeatTimeout
+        member this.TaskScheduleToStartTimeout  = taskScheduleToStartTimeout
+        member this.TaskStartToCloseTimeout     = taskStartToCloseTimeout
+        member this.TaskScheduleToCloseTimeout  = taskScheduleToCloseTimeout
+
+        member this.Process (input)             = processor input
+
+type Activity = Activity<string, string>
 
 and StageAction = 
-    | ScheduleActivity      of Activity
+    | ScheduleActivity      of IActivity
     | StartChildWorkflow    of Workflow
 
 and Stage =
@@ -69,10 +104,6 @@ and Workflow (domain, name, description, version, ?taskList,
 
     // sort the stages by Id
     let stages = defaultArg stages [] |> List.sortBy (fun { Id = id } -> id)
-//    let stages =
-//        activities
-//        |> List.rev
-//        |> List.mapi (fun i activity -> { Id = i; Action = ScheduleActivity activity; Version = sprintf "%s.%d" name i })
 
     /// registers the workflow and activity types
     let register (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
@@ -186,7 +217,7 @@ and Workflow (domain, name, description, version, ?taskList,
         |> List.iter (fun activity -> 
             let heartbeat = TimeSpan.FromSeconds(float activity.TaskHeartbeatTimeout)
             ActivityWorker.Start(clt, domain, activity.TaskList.Name,
-                                 activity.Task, onActivityTaskError.Trigger, 
+                                 activity.Process, onActivityTaskError.Trigger, 
                                  heartbeat))
 
     member private this.Append (toAction : 'a -> StageAction, item : 'a) = 
@@ -222,7 +253,7 @@ and Workflow (domain, name, description, version, ?taskList,
         |> List.choose (function | { Action = StartChildWorkflow(workflow) } -> Some workflow | _ -> None)
         |> List.iter (fun workflow -> workflow.Start swfClt)
 
-    static member (++>) (workflow : Workflow, activity : Activity) = workflow.Append(ScheduleActivity, activity)
+    static member (++>) (workflow : Workflow, activity : IActivity) = workflow.Append(ScheduleActivity, activity)
     static member (++>) (workflow : Workflow, childWorkflow : Workflow) = 
         if childWorkflow.ExecutionStartToCloseTimeout.IsNone then failwithf "child workflows must specify execution timeout"
         if childWorkflow.TaskStartToCloseTimeout.IsNone then failwithf "child workflows must specify decision task timeout"
