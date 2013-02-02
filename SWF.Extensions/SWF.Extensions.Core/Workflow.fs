@@ -70,9 +70,9 @@ type Activity = Activity<string, string>
 
 type StageExecutionState =
     {
-        StageNumber   : int
-        AttemptNumber : int
-        MaxAttempts   : int
+        mutable StageNumber   : int
+        mutable AttemptNumber : int
+        mutable MaxAttempts   : int
     }
 
 /// The different actions that can be taken as a stage in the workflow
