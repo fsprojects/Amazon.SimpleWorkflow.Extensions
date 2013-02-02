@@ -28,3 +28,6 @@ The facilities provided by the .Net SDK is a straight mapping to the [actions](h
 * ...
 
 The goal of this project is to provide a framework that allows you to design and implement a workflow using SWF with as little friction in the development process as possible.
+
+###Example usages
+Check out the [Wiki](https://github.com/theburningmonk/Amazon.SimpleWorkflow.Extensions/wiki) page for a list of examples.
