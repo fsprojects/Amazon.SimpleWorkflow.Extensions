@@ -746,8 +746,35 @@ type HistoryEvent =
             EventType   = EventType.op_Explicit evt
         }
 
-type DecisionTask (task : Amazon.SimpleWorkflow.Model.DecisionTask) =
-    member this.Events                  = task.Events |> Seq.map HistoryEvent.op_Explicit |> Seq.toList
+type DecisionTask (task   : Amazon.SimpleWorkflow.Model.DecisionTask, 
+                   client : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient,
+                   domain,
+                   tasklist) =
+    let nextPageToken = ref task.NextPageToken
+
+    // returns more events for this task if possible
+    let getMoreEvts () = 
+        if String.IsNullOrWhiteSpace(nextPageToken.Value) 
+        then [||] :> Amazon.SimpleWorkflow.Model.HistoryEvent seq
+        else
+            // poll for decision task again with the next page token to get more events
+            let req = PollForDecisionTaskRequest(Domain = domain, ReverseOrder = true)
+                        .WithNextPageToken(nextPageToken.Value)
+                        .WithTaskList(TaskList(Name = tasklist))
+
+            let res = client.PollForDecisionTask(req)
+            nextPageToken := res.PollForDecisionTaskResult.DecisionTask.NextPageToken
+            res.PollForDecisionTaskResult.DecisionTask.Events :> Amazon.SimpleWorkflow.Model.HistoryEvent seq
+
+    // the sequence of raw history events (from the AWSSDK)
+    let rawEvents = seq {
+        yield! task.Events
+        while not <| String.IsNullOrWhiteSpace(nextPageToken.Value) do
+            yield! getMoreEvts()
+    }
+                    
+    member this.Domain                  = domain
+    member this.Events                  = rawEvents |> Seq.map HistoryEvent.op_Explicit |> Seq.cache
     member this.StartedEventId          = task.StartedEventId
     member this.PreviousStartedEventId  = task.PreviousStartedEventId
     member this.TaskToken               = task.TaskToken

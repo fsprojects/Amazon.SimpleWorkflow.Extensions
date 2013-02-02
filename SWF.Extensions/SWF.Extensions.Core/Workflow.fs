@@ -1,6 +1,7 @@
 ﻿namespace Amazon.SimpleWorkflow.Extensions
 
 open System
+open Microsoft.FSharp.Collections
 
 open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Model
@@ -8,20 +9,6 @@ open ServiceStack.Text
 
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Extensions.Model
-
-[<RequireQualifiedAccess>]
-module HistoryEvents =
-    /// Returns the input to the workflow from the list of events
-    let rec getWorkflowInput = function
-        | []    -> None
-        | { EventType = WorkflowExecutionStarted(_, _, _, _, _, _, _, input, _, _) }::_ 
-                -> input
-        | _::tl -> getWorkflowInput tl
-
-    /// Returns the event type associated with the specified Event ID
-    let rec getEventTypeById eventId = function
-        | { EventId = eventId'; EventType = eventType }::tl when eventId = eventId' -> eventType
-        | hd::tl -> getEventTypeById eventId tl
 
 // Represents an activity
 type IActivity =
@@ -120,6 +107,24 @@ and Workflow (domain, name, description, version, ?taskList,
     let onWorkflowCompleted = new Event<Domain * Name>()
 
     static let stageStateSerializer = JsonSerializer<StageExecutionState>()
+    
+    // identifies the key events which we need to respond to
+    let (|KeyEvent|_|) historyEvt = 
+        match historyEvt with
+        | { EventType = ActivityTaskFailed _ } 
+        | { EventType = ActivityTaskTimedOut _ } 
+        | { EventType = ActivityTaskCompleted _ }
+        | { EventType = ChildWorkflowExecutionFailed _ } 
+        | { EventType = ChildWorkflowExecutionCompleted _ } 
+        | { EventType = ChildWorkflowExecutionCompleted _ }
+        | { EventType = StartChildWorkflowExecutionInitiated _ }
+        | { EventType = WorkflowExecutionStarted _ }
+            -> Some historyEvt.EventType
+        | _ -> None
+
+    // returns the event type associated with the specified event ID
+    let findEventTypeById eventId (evts : HistoryEvent seq) =
+        evts |> Seq.pick (function | { EventId = eventId'; EventType = eventType } when eventId = eventId' -> Some eventType | _ -> None)
 
     let getStageActionId actionName { StageNumber = stage; AttemptNumber = n } = sprintf "%d.%s.attempt_%d" stage actionName n
     let getActivityVersion stageNum = sprintf "%s.%d" name stageNum
@@ -130,7 +135,7 @@ and Workflow (domain, name, description, version, ?taskList,
     /// tries to get the nth (zero-index) stage
     let getStage n = if n >= stages.Length then None else List.nth stages n |> Some
 
-    /// registers the workflow and activity types
+    // registers the workflow and activity types
     let register (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
         let registerActivities stages = async {
             let req = ListActivityTypesRequest(Domain = domain).WithRegistrationStatus(string Registered)
@@ -196,7 +201,7 @@ and Workflow (domain, name, description, version, ?taskList,
         |> Async.Parallel
         |> Async.RunSynchronously
     
-    /// schedules the nth (zero-indexed) stage
+    // schedules the nth (zero-indexed) stage
     let scheduleStage n input attempts =
         let scheduleActivity stageNum (activity : IActivity) = 
             let activityType = ActivityType(Name = activity.Name, Version = getActivityVersion stageNum)
@@ -236,7 +241,7 @@ and Workflow (domain, name, description, version, ?taskList,
         | None -> onWorkflowCompleted.Trigger(domain, name)
                   [| CompleteWorkflowExecution input |], ""
 
-    let rec decide (events : HistoryEvent list) input =
+    let rec decide (events : HistoryEvent seq) =
         // makes the next move based on the control data for the previous step and its result
         let nextStep (Some control) result =
             let state = stageStateSerializer.DeserializeFromString control
@@ -259,46 +264,47 @@ and Workflow (domain, name, description, version, ?taskList,
             then [| FailWorkflowExecution(details, reason) |], ""
             else scheduleStage state.StageNumber input state.AttemptNumber // retry with the original input
 
-        match events with
-        | [] -> scheduleStage 0 input 0
+        let keyEvt = events |> Seq.pick (function | KeyEvent evtType -> Some evtType | _ -> None)
+
+        match keyEvt with
+        | WorkflowExecutionStarted(_, _, _, _, _, _, _, input, _, _) -> scheduleStage 0 input 0
+
         // when activities and workflows completed/failed, we need to go back to the event that scheduled them in order
         // to get the control data we need to find out the state of that stage of the workflow in order to decide
         // on the appropriate next course of action
-        | { EventType = ActivityTaskFailed(scheduledEvtId, _, details, reason) }::tl ->
-            let (ActivityTaskScheduled(activityId, _, _, _, control, input, _, _, _, _)) = HistoryEvents.getEventTypeById scheduledEvtId tl            
+        | ActivityTaskFailed(scheduledEvtId, _, details, reason) ->
+            let (ActivityTaskScheduled(activityId, _, _, _, control, input, _, _, _, _)) = findEventTypeById scheduledEvtId events
             failedStage control activityId input details reason
 
-        | { EventType = ActivityTaskTimedOut(scheduledEvtId, _, timeoutType, details) }::tl ->
-            let (ActivityTaskScheduled(activityId, _, _, _, control, input, _, _, _, _)) = HistoryEvents.getEventTypeById scheduledEvtId tl            
+        | ActivityTaskTimedOut(scheduledEvtId, _, timeoutType, details) ->
+            let (ActivityTaskScheduled(activityId, _, _, _, control, input, _, _, _, _)) = findEventTypeById scheduledEvtId events            
             failedStage control activityId input details (Some(sprintf "Timeout : %s" <| str timeoutType))
 
-        | { EventType = ActivityTaskCompleted(scheduledEvtId, _, result) }::tl ->
-            let (ActivityTaskScheduled(_, _, _, _, control, _, _, _, _, _)) = HistoryEvents.getEventTypeById scheduledEvtId tl
+        | ActivityTaskCompleted(scheduledEvtId, _, result) ->
+            let (ActivityTaskScheduled(_, _, _, _, control, _, _, _, _, _)) = findEventTypeById scheduledEvtId events
             nextStep control result
 
-        | { EventType = ChildWorkflowExecutionFailed(initiatedEvtId, _, workflowExec, _, details, reason) }::tl ->            
-            let (StartChildWorkflowExecutionInitiated(_, _, _, _, _, _, input, control, _, _)) = HistoryEvents.getEventTypeById initiatedEvtId tl
+        | ChildWorkflowExecutionFailed(initiatedEvtId, _, workflowExec, _, details, reason) ->            
+            let (StartChildWorkflowExecutionInitiated(_, _, _, _, _, _, input, control, _, _)) = findEventTypeById initiatedEvtId events
             failedStage control workflowExec.RunId input details reason
 
-        | { EventType = ChildWorkflowExecutionCompleted(initiatedEvtId, _, _, _, result) }::tl ->
-            let (StartChildWorkflowExecutionInitiated(_, _, _, _, _, _, _, control, _, _)) = HistoryEvents.getEventTypeById initiatedEvtId tl
+        | ChildWorkflowExecutionCompleted(initiatedEvtId, _, _, _, result) ->
+            let (StartChildWorkflowExecutionInitiated(_, _, _, _, _, _, _, control, _, _)) = findEventTypeById initiatedEvtId events
             nextStep control result
 
-        | { EventType = StartChildWorkflowExecutionInitiated _ }::tl ->
+        | StartChildWorkflowExecutionInitiated _ ->
             // we're still waiting for a child workflow to finish, do nothing for now
             [||], ""
-        | hd::tl -> decide tl input
 
-    let decider (task : DecisionTask) = 
-        let input = HistoryEvents.getWorkflowInput task.Events
-        decide task.Events input
+    let decider (task : DecisionTask) = decide task.Events
 
     let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decider, onDecisionTaskError.Trigger, ?identity = identity)
     let startActivityWorkers (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
         stages 
         |> List.choose (function | { Action = ScheduleActivity(activity) } -> Some activity | _ -> None)
         |> List.iter (fun activity -> 
-            let heartbeat = TimeSpan.FromSeconds(float activity.TaskHeartbeatTimeout)
+            // leave some buffer for heart beat frequency, record a heartbeat every 75% of the timeout
+            let heartbeat = TimeSpan.FromSeconds(float activity.TaskHeartbeatTimeout * 0.75)
             ActivityWorker.Start(clt, domain, activity.TaskList.Name, activity.Process, onActivityTaskError.Trigger, heartbeat, ?identity = identity))
 
     member private this.Append (toAction : 'a -> StageAction, item : 'a) = 
@@ -311,7 +317,7 @@ and Workflow (domain, name, description, version, ?taskList,
                  ?childPolicy             = childPolicy,
                  ?identity                = identity)         
 
-    // #region public Events
+    // #region Public Events
 
     [<CLIEvent>] member this.OnDecisionTaskError = onDecisionTaskError.Publish
     [<CLIEvent>] member this.OnActivityTaskError = onActivityTaskError.Publish
@@ -321,6 +327,8 @@ and Workflow (domain, name, description, version, ?taskList,
 
     // #endregion
 
+    // #region Properties
+
     member this.Name                         = name
     member this.Version                      = version
     member this.TaskList                     = taskList
@@ -329,6 +337,8 @@ and Workflow (domain, name, description, version, ?taskList,
     member this.ChildPolicy                  = childPolicy
     member this.MaxAttempts                  = maxAttempts
     member this.NumberOfStages               = stages.Length    
+
+    // #endregion
 
     member this.Start swfClt = 
         register swfClt |> ignore

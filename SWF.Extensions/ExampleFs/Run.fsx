@@ -5,15 +5,15 @@
 
 open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Extensions
-open Amazon.SimpleWorkflow.Model
 
-let awsKey      = "AKIAJWLLBHKGW7TOXTFQ"
-let awsSecret   = "xS+bLuqPqy14R3GTOYvzQ2MmAW+hZiLiFPrtvrku"
+let awsKey      = "PUT_YOUR_AWS_KEY_HERE"
+let awsSecret   = "PUT_YOUR_AWS_SECRET_HERE"
 let client = new AmazonSimpleWorkflowClient(awsKey, awsSecret)
 
 // uncomment the example you want to run to test it out
-BasicExamples.helloWorldWorkflow.Start(client)
+//BasicExamples.helloWorldWorkflow.Start(client)
 //BasicExamples.echoWorkflow.Start(client)
 //BasicExamples.genericActivityWorkflow.Start(client)
 //BasicExamples.simplePipelineWorkflow.Start(client)
 //BasicExamples.withChildWorkflow.Start(client)
+//BasicExamples.failedWorkflow.Start(client)

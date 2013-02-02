@@ -33,7 +33,7 @@ type DecisionWorker private (
                 pollReq.WithIdentity    <-? identity
 
                 let! pollRes = clt.PollForDecisionTaskAsync(pollReq)
-                let task = DecisionTask(pollRes.PollForDecisionTaskResult.DecisionTask)
+                let task = DecisionTask(pollRes.PollForDecisionTaskResult.DecisionTask, clt, domain, tasklist)
 
                 let decisions, execContext = decide(task) |> (fun (decisions, cxt) -> decisions |> Array.map (fun x -> x.ToSwfDecision()), cxt)
                 let req = RespondDecisionTaskCompletedRequest()
@@ -111,10 +111,10 @@ type ActivityWorker private (
     // function to record heartbeats periodically
     let recordHeartbeat (task : ActivityTask) = async {
         while true do
-            do! Async.Sleep(int heartbeatFreq.TotalMilliseconds)
             let req = RecordActivityTaskHeartbeatRequest()
                         .WithTaskToken(task.TaskToken)
             do! clt.RecordActivityTaskHeartbeatAsync(req) |> Async.Ignore
+            do! Async.Sleep(int heartbeatFreq.TotalMilliseconds)
     }
 
     // task handler function
@@ -128,7 +128,7 @@ type ActivityWorker private (
                             .WithTaskToken(task.TaskToken)
                             .WithResult(result)
                 do! clt.RespondActivityTaskCompletedAsync(req) |> Async.Ignore
-                cts.Dispose()
+                cts.Cancel()
             with exn ->
                 // include the exception's message and stacktrace in the response
                 let req = RespondActivityTaskFailedRequest()
@@ -136,7 +136,7 @@ type ActivityWorker private (
                             .WithReason(exn.Message)
                             .WithDetails(exn.StackTrace)
                 do! clt.RespondActivityTaskFailedAsync(req) |> Async.Ignore
-                cts.Dispose()
+                cts.Cancel()
         }
 
         handler, cts
