@@ -132,7 +132,6 @@ let withChildWorkflow =
 // to that many attempts (e.g. max 3 attempts = 1 attempt + 2 retries), if the activity failed
 // or timed out on the last retry then it'll be failed and the whole workflow will be failed
 
-// sings the first part of the song and return the second part as result
 let alwaysFail _ = failwith "oops"
 
 let failedWorkflowWithActivity = 
