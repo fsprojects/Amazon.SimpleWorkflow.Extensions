@@ -337,7 +337,8 @@ and Workflow (domain, name, description, version, ?taskList,
                  ?taskStartToCloseTimeout = taskStartToCloseTimeout,
                  ?execStartToCloseTimeout = execStartToCloseTimeout,
                  ?childPolicy             = childPolicy,
-                 ?identity                = identity)         
+                 ?identity                = identity,
+                 maxAttempts              = maxAttempts)         
                  
     member this.Start swfClt = 
         register swfClt |> ignore
