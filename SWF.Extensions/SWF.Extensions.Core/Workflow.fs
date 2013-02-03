@@ -10,17 +10,22 @@ open ServiceStack.Text
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Extensions.Model
 
-// Represents an activity
-type IActivity =
+// Marker interface for anything that can be scheduled at a stage of a workflow
+type ISchedulable = 
     abstract member Name        : string
     abstract member Description : string
+    abstract member MaxAttempts : int
+
+// Represents an activity
+type IActivity =
+    inherit ISchedulable
+
     abstract member TaskList    : TaskList    
     abstract member TaskHeartbeatTimeout        : Seconds
     abstract member TaskScheduleToStartTimeout  : Seconds
     abstract member TaskStartToCloseTimeout     : Seconds
     abstract member TaskScheduleToCloseTimeout  : Seconds
-    abstract member MaxAttempts                 : int
-
+    
     /// Processes a string input and returns the result
     abstract member Process     : string -> string
 
@@ -126,11 +131,22 @@ and Workflow (domain, name, description, version, ?taskList,
     let findEventTypeById eventId (evts : HistoryEvent seq) =
         evts |> Seq.pick (function | { EventId = eventId'; EventType = eventType } when eventId = eventId' -> Some eventType | _ -> None)
 
-    let getStageActionId actionName { StageNumber = stage; AttemptNumber = n } = sprintf "%d.%s.attempt_%d" stage actionName n
+    let getStageActionId actionName { StageNumber = stage; AttemptNumber = n } = 
+        sprintf "%d.%s.attempt_%d.%s" stage actionName n (Guid.NewGuid().ToString().Substring(0, 8))
     let getActivityVersion stageNum = sprintf "%s.%d" name stageNum
 
     // sort the stages by Id
     let stages = defaultArg stages [] |> List.sortBy (fun { StageNumber = n } -> n)
+
+    // all the activities (including those part of a schedule multiple action)
+    let activities = stages |> List.collect (function 
+            | { Action = ScheduleActivity(activity) } -> [ activity ]
+            | _ -> [])
+
+    // all the child workflows (including those part of a schedule multiple action)
+    let childWorkflows = stages |> List.collect (function 
+            | { Action = StartChildWorkflow(workflow) } -> [ workflow ]
+            | _ -> [])
     
     /// tries to get the nth (zero-index) stage
     let getStage n = if n >= stages.Length then None else List.nth stages n |> Some
@@ -146,10 +162,10 @@ and Workflow (domain, name, description, version, ?taskList,
                            |> Set.ofSeq
 
             let activities = stages 
-                             |> List.choose (function 
+                             |> List.collect (function 
                                 | { StageNumber = stageNum; Action = ScheduleActivity(activity) }
-                                    -> Some(stageNum, activity, getActivityVersion stageNum)
-                                | _ -> None)
+                                    -> [ (stageNum, activity, getActivityVersion stageNum) ]
+                                | _ -> [])
                              |> List.filter (fun (_, activity, version) -> not <| existing.Contains(activity.Name, version))
 
             for (id, activity, version) in activities do
@@ -219,10 +235,11 @@ and Workflow (domain, name, description, version, ?taskList,
             [| decision |], ""
 
         let scheduleChildWorkflow stageNum (workflow : Workflow) =
-            let workflowType = WorkflowType(Name = workflow.Name, Version = workflow.Version)
-            let state        = { StageNumber = stageNum; AttemptNumber = attempts + 1; MaxAttempts = workflow.MaxAttempts }
+            let schedulable  = workflow :> ISchedulable
+            let workflowType = WorkflowType(Name = schedulable.Name, Version = workflow.Version)
+            let state        = { StageNumber = stageNum; AttemptNumber = attempts + 1; MaxAttempts = schedulable.MaxAttempts }
             let control      = state |> stageStateSerializer.SerializeToString
-            let decision = StartChildWorkflowExecution(getStageActionId workflow.Name state, 
+            let decision = StartChildWorkflowExecution(getStageActionId schedulable.Name state, 
                                                        workflowType,
                                                        workflow.ChildPolicy,
                                                        Some workflow.TaskList, 
@@ -257,7 +274,7 @@ and Workflow (domain, name, description, version, ?taskList,
             | Some { Action = ScheduleActivity(activity) } 
                 -> onActivityFailed.Trigger(domain, activity.Name, actionId, details, reason)
             | Some { Action = StartChildWorkflow(workflow) }
-                -> onWorkflowFailed.Trigger(domain, workflow.Name, actionId, details, reason)
+                -> onWorkflowFailed.Trigger(domain, (workflow :> ISchedulable).Name, actionId, details, reason)
             | _ -> ()
 
             if state.AttemptNumber >= state.MaxAttempts
@@ -299,13 +316,18 @@ and Workflow (domain, name, description, version, ?taskList,
     let decider (task : DecisionTask) = decide task.Events
 
     let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decider, onDecisionTaskError.Trigger, ?identity = identity)
-    let startActivityWorkers (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
-        stages 
-        |> List.choose (function | { Action = ScheduleActivity(activity) } -> Some activity | _ -> None)
+    let startActivityWorkers clt = 
+        activities
         |> List.iter (fun activity -> 
             // leave some buffer for heart beat frequency, record a heartbeat every 75% of the timeout
             let heartbeat = TimeSpan.FromSeconds(float activity.TaskHeartbeatTimeout * 0.75)
             ActivityWorker.Start(clt, domain, activity.TaskList.Name, activity.Process, onActivityTaskError.Trigger, heartbeat, ?identity = identity))
+    let startChildWorkflows clt = childWorkflows |> List.iter (fun workflow -> workflow.Start clt)
+
+    static let validateChildWorkflow (child : Workflow) =
+        if child.ExecutionStartToCloseTimeout.IsNone then failwithf "child workflows must specify execution timeout"
+        if child.TaskStartToCloseTimeout.IsNone then failwithf "child workflows must specify decision task timeout"
+        if child.ChildPolicy.IsNone then failwithf "child workflows must specify child policy"
 
     member private this.Append (toAction : 'a -> StageAction, item : 'a) = 
         let id = stages.Length
@@ -316,6 +338,12 @@ and Workflow (domain, name, description, version, ?taskList,
                  ?execStartToCloseTimeout = execStartToCloseTimeout,
                  ?childPolicy             = childPolicy,
                  ?identity                = identity)         
+                 
+    member this.Start swfClt = 
+        register swfClt |> ignore
+        startDecisionWorker  swfClt
+        startActivityWorkers swfClt
+        startChildWorkflows  swfClt        
 
     // #region Public Events
 
@@ -326,38 +354,25 @@ and Workflow (domain, name, description, version, ?taskList,
     [<CLIEvent>] member this.OnWorkflowCompleted = onWorkflowCompleted.Publish
 
     // #endregion
+         
+    interface ISchedulable with
+        member this.Name                     = name
+        member this.Description              = description
+        member this.MaxAttempts              = maxAttempts
 
-    // #region Properties
-
-    member this.Name                         = name
     member this.Version                      = version
     member this.TaskList                     = taskList
     member this.TaskStartToCloseTimeout      = taskStartToCloseTimeout
     member this.ExecutionStartToCloseTimeout = execStartToCloseTimeout
     member this.ChildPolicy                  = childPolicy
-    member this.MaxAttempts                  = maxAttempts
-    member this.NumberOfStages               = stages.Length    
-
-    // #endregion
-
-    member this.Start swfClt = 
-        register swfClt |> ignore
-        startDecisionWorker  swfClt
-        startActivityWorkers swfClt
-
-        // start any child workflows
-        stages 
-        |> List.choose (function | { Action = StartChildWorkflow(workflow) } -> Some workflow | _ -> None)
-        |> List.iter (fun workflow -> workflow.Start swfClt)
+    
+    member this.NumberOfStages               = stages.Length
 
     // #region Operators
 
     static member (++>) (workflow : Workflow, activity : IActivity) = workflow.Append(ScheduleActivity, activity)
-    static member (++>) (workflow : Workflow, childWorkflow : Workflow) = 
-        if childWorkflow.ExecutionStartToCloseTimeout.IsNone then failwithf "child workflows must specify execution timeout"
-        if childWorkflow.TaskStartToCloseTimeout.IsNone then failwithf "child workflows must specify decision task timeout"
-        if childWorkflow.ChildPolicy.IsNone then failwithf "child workflows must specify child policy"
-
+    static member (++>) (workflow : Workflow, childWorkflow : Workflow) =         
+        validateChildWorkflow childWorkflow
         workflow.Append(StartChildWorkflow, childWorkflow)
 
     // #endregion
