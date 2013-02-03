@@ -127,16 +127,17 @@ let withChildWorkflow =
 
 // #endregion
 
-// #region Failed Workflow example
+// #region Failed Workflow (Activity) example
+// you can specify a max number of attempts for each activity, the activity will be retried up
+// to that many attempts (e.g. max 3 attempts = 1 attempt + 2 retries), if the activity failed
+// or timed out on the last retry then it'll be failed and the whole workflow will be failed
 
 // sings the first part of the song and return the second part as result
 let alwaysFail _ = failwith "oops"
 
-// unlike the main workflow, child workflows MUST specify the timeouts and child
-// policy on the workflow definition itself
-let failedWorkflow = 
-    Workflow(domain = "theburningmonk.com", name = "failed_workflow", 
-             description = "this workflow will fail", 
+let failedWorkflowWithActivity = 
+    Workflow(domain = "theburningmonk.com", name = "failed_workflow_with_activity", 
+             description = "this workflow will fail because of its activity", 
              version = "1",
              execStartToCloseTimeout = 60, 
              taskStartToCloseTimeout = 30,
@@ -147,5 +148,35 @@ let failedWorkflow =
                  taskStartToCloseTimeout    = 10, 
                  taskScheduleToCloseTimeout = 20,
                  maxAttempts = 3)   // max 3 attempts, and fail the workflow after that
+
+// #endregion
+
+// #region Failed Workflow (ChildWorkflow) example
+// the same retry mechanism can be applied to child workflows too
+
+// unlike the main workflow, child workflows MUST specify the timeouts and child
+// policy on the workflow definition itself
+let alwaysFailChildWorkflow = 
+    Workflow(domain = "theburningmonk.com", name = "failed_child_workflow", 
+             description = "this child workflow will always fail", 
+             version = "1",
+             execStartToCloseTimeout = 60, 
+             taskStartToCloseTimeout = 30,
+             childPolicy = ChildPolicy.Terminate,
+             maxAttempts = 3)
+    ++> Activity("always_fail", "this activity will always fail", alwaysFail,
+                 taskHeartbeatTimeout       = 60, 
+                 taskScheduleToStartTimeout = 10,
+                 taskStartToCloseTimeout    = 10, 
+                 taskScheduleToCloseTimeout = 20)
+
+let failedWorkflowWithChildWorkflow = 
+    Workflow(domain = "theburningmonk.com", name = "failed_workflow_with_child_workflow", 
+             description = "this workflow will fail because of its child workflow", 
+             version = "1",
+             execStartToCloseTimeout = 60, 
+             taskStartToCloseTimeout = 30,
+             childPolicy = ChildPolicy.Terminate)
+    ++> alwaysFailChildWorkflow
 
 // #endregion
