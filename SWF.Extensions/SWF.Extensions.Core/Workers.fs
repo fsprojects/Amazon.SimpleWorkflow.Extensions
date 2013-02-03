@@ -145,12 +145,16 @@ type ActivityWorker private (
         while true do
             try
                 let! task = pollTask()
-                let handler, cts = getTaskHandler(task)
 
-                // start the heart beat in a separate async computation, but use the same 
-                // cancellation token as the task handler
-                Async.Start(recordHeartbeat(task), cts.Token)
-                Async.StartImmediate(handler)
+                match task.TaskToken with
+                | null -> () // make sure task token was received correctly, otherwise, skip the task
+                | _ ->
+                    let handler, cts = getTaskHandler(task)
+
+                    // start the heart beat in a separate async computation, but use the same 
+                    // cancellation token as the task handler
+                    Async.Start(recordHeartbeat(task), cts.Token)
+                    Async.StartImmediate(handler)
             with exn ->
                 // invokes the specified exception handler to handle non-hanlder errors
                 onExn(exn)
