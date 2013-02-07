@@ -17,8 +17,9 @@ open Amazon.SimpleWorkflow.Extensions.Model
 type DecisionWorker private (
                                 clt          : AmazonSimpleWorkflowClient,
                                 domain       : string,
-                                tasklist     : string,                             
-                                decide       : DecisionTask -> Decision[] * string, // function that makes the decisions based on task, and a new execution context
+                                tasklist     : string,
+                                // function that makes the decisions based on task, and a new execution context
+                                decide       : AmazonSimpleWorkflowClient * DecisionTask -> Decision[] * string, 
                                 onExn        : Exception -> unit,                   // function that handles exceptions
                                 ?identity    : Identity,                            // identity of the worker (e.g. instance ID, IP, etc.)
                                 ?concurrency : int                                  // the number of concurrent workers
@@ -35,7 +36,7 @@ type DecisionWorker private (
                 let! pollRes = clt.PollForDecisionTaskAsync(pollReq)
                 let task = DecisionTask(pollRes.PollForDecisionTaskResult.DecisionTask, clt, domain, tasklist)
 
-                let decisions, execContext = decide(task) |> (fun (decisions, cxt) -> decisions |> Array.map (fun x -> x.ToSwfDecision()), cxt)
+                let decisions, execContext = decide(clt, task) |> (fun (decisions, cxt) -> decisions |> Array.map (fun x -> x.ToSwfDecision()), cxt)
                 let req = RespondDecisionTaskCompletedRequest()
                             .WithTaskToken(task.TaskToken)
                             .WithDecisions(decisions)
@@ -52,7 +53,7 @@ type DecisionWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        decide          : Func<DecisionTask, Decision[] * string>,
+                        decide          : Func<AmazonSimpleWorkflowClient, DecisionTask, Decision[] * string>,
                         onExn           : Action<Exception>) =
         let decide, onExn = (fun t -> decide.Invoke(t)), (fun exn -> onExn.Invoke(exn))
         DecisionWorker(clt, domain, tasklist, decide, onExn) |> ignore
@@ -61,7 +62,7 @@ type DecisionWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        decide          : Func<DecisionTask, Decision[] * string>,
+                        decide          : Func<AmazonSimpleWorkflowClient, DecisionTask, Decision[] * string>,
                         onExn           : Action<Exception>,
                         identity        : Identity,
                         concurrency     : int) =
@@ -72,7 +73,7 @@ type DecisionWorker private (
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
                         tasklist        : string,                        
-                        decide          : DecisionTask -> Decision[] * string,
+                        decide          : AmazonSimpleWorkflowClient * DecisionTask -> Decision[] * string,
                         onExn           : Exception -> unit,
                         ?identity       : Identity,
                         ?concurrency    : int) =

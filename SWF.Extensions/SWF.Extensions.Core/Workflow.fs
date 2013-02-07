@@ -1,7 +1,7 @@
 ﻿namespace Amazon.SimpleWorkflow.Extensions
 
 open System
-open Microsoft.FSharp.Collections
+open System.Collections.Generic
 
 open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Model
@@ -54,7 +54,10 @@ type SchedulableState =
         mutable TotalActions  : int     // total number of actions scheduled together
     }
 
-type Reducer = string[] -> string
+/// Reducer is a function that takes a dictionary of action number and action result and reduce
+/// them into a single string as an aggregated result for the next activity/child workflow
+/// in the current workflow
+type Reducer = Dictionary<int, string> -> string
 
 /// The different actions that can be taken as a stage in the workflow
 type StageAction = 
@@ -72,11 +75,12 @@ type Stage =
         Action      : StageAction   // what action to perform at this stage in the workflow?
     }
 
+/// Represents the state of a workflow
 type WorkflowState =
     {
-        CurrentStageNumber  : int   // zero-based index of the currently executing stage
-        TotalActions        : int   // total number of actions scheduled at this stage
-        CompletedActions    : int   // the number of completed 
+        mutable CurrentStageNumber  : int   // zero-based index of the currently executing stage
+        mutable TotalActions        : int   // total number of actions scheduled at this stage
+        mutable Results             : Dictionary<int, string>   // the results from the actions so far
     }
 
 [<AutoOpen>]
@@ -343,10 +347,10 @@ type Workflow (domain, name, description, version, ?taskList,
         match getStage stageNum with
         | Some({ Action = ScheduleActivity(activity) }) 
                -> [| scheduleActivityStage name stageNum activity input attempts |],
-                  serializeWorkflowState { CurrentStageNumber = stageNum; TotalActions = 1 }
+                  serializeWorkflowState { CurrentStageNumber = stageNum; TotalActions = 1; Results = new Dictionary<int, string>() }
         | Some({ Action = StartChildWorkflow(workflow) }) 
                -> [| scheduleChildWorkflowStage stageNum workflow input attempts |], 
-                  serializeWorkflowState { CurrentStageNumber = stageNum; TotalActions = 1 }
+                  serializeWorkflowState { CurrentStageNumber = stageNum; TotalActions = 1; Results = new Dictionary<int, string>() }
         | Some({ Action = ParallelActions(actions, _) })
                -> let totalActions = actions.Length
                   
@@ -356,26 +360,47 @@ type Workflow (domain, name, description, version, ?taskList,
                       | :? IActivity as activity -> scheduleActivity i totalActions name stageNum activity input attempts
                       | :? IWorkflow as workflow -> scheduleChildWorkflow i totalActions stageNum workflow input attempts)
 
-                  decisions, serializeWorkflowState { CurrentStageNumber = stageNum; TotalActions = totalActions }
+                  decisions, serializeWorkflowState { CurrentStageNumber = stageNum; TotalActions = totalActions; Results = new Dictionary<int, string>() }
         | None -> onWorkflowCompleted.Trigger(domain, name)
                   [| CompleteWorkflowExecution input |], ""
 
-    let rec decide (events : HistoryEvent seq) =
+    let decide (swfClient : AmazonSimpleWorkflowClient, task : DecisionTask) =
         // makes the next move based on the control data for the previous step and its result
         let nextStep (Some control) result =
             let state = deserializeSchedulableState control
 
-            // TODO - determine whether or not to stage next stage depending on number of outstanding actions
+            // if there are more than one action scheduled at once, then check if they're all completed before
+            // attempting to schedule the next stage
             if state.TotalActions > 1 
-            then [||], ""
-            else scheduleStage (state.StageNumber + 1) result 0 // 0 = first attempt (0 attempts so far)
+            then 
+                let req = DescribeWorkflowExecutionRequest(Domain = domain, Execution = task.WorkflowExecution)
+                let res = swfClient.DescribeWorkflowExecution(req)
+
+                // get the latest workflow state
+                let latestExecCtx = res.DescribeWorkflowExecutionResult.WorkflowExecutionDetail.LatestExecutionContext
+                let wfState = deserializeWorkflowState latestExecCtx
+                
+                wfState.Results.[state.ActionNumber] <- defaultArg result Unchecked.defaultof<string>
+
+                // if all the results are in, then aggregate them with the reducer and schedule the next stage
+                // otherwise, do nothing, and simply update the current workflow
+                if wfState.Results.Count = wfState.TotalActions 
+                then
+                    let (Some stage) = getStage state.StageNumber
+                    match stage with
+                    | { Action = ParallelActions(_, reduce) } ->
+                        let result = reduce wfState.Results
+                        scheduleStage (state.StageNumber + 1) (Some result) 0
+                    | _ -> failwithf "Workflow %s's stage %d is expected to be ParallelActions" name state.StageNumber                        
+                else [||], serializeWorkflowState wfState
+            else scheduleStage (state.StageNumber + 1) result 0
 
         // defailed wheter to fail the workflow or retry a failed action
         let retryAction (Some control) actionId input details reason =
             let state = deserializeSchedulableState control
 
             // get the scheduled action that failed, raise the appropriate event
-            let stage = getStage state.StageNumber |> Option.get
+            let (Some stage) = getStage state.StageNumber
             let schedulable = getScheduled state stage
             match schedulable with
             | :? IActivity as activity -> onActivityFailed.Trigger(domain, activity.Name, actionId, details, reason)
@@ -392,6 +417,7 @@ type Workflow (domain, name, description, version, ?taskList,
                 | :? IWorkflow as workflow -> 
                     [| scheduleChildWorkflow state.ActionNumber state.TotalActions state.StageNumber workflow input state.AttemptNumber |], ""                
 
+        let events = task.Events
         let keyEvt = events |> Seq.pick (function | KeyEvent evtType -> Some evtType | _ -> None)
 
         match keyEvt with
@@ -424,9 +450,7 @@ type Workflow (domain, name, description, version, ?taskList,
             // we're still waiting for a child workflow to finish, do nothing for now
             [||], ""
 
-    let decider (task : DecisionTask) = decide task.Events
-
-    let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decider, onDecisionTaskError.Trigger, ?identity = identity)
+    let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decide, onDecisionTaskError.Trigger, ?identity = identity)
     let startActivityWorkers clt = 
         activities
         |> List.iter (fun activity -> 
@@ -435,22 +459,28 @@ type Workflow (domain, name, description, version, ?taskList,
             ActivityWorker.Start(clt, domain, activity.TaskList.Name, activity.Process, onActivityTaskError.Trigger, heartbeat, ?identity = identity))
     let startChildWorkflows clt = childWorkflows |> List.iter (fun workflow -> workflow.Start clt)
 
+    let start clt = 
+        register clt |> ignore
+        startDecisionWorker  clt
+        startActivityWorkers clt
+        startChildWorkflows  clt
+
     static let validateChildWorkflow (child : IWorkflow) =
         if child.ExecutionStartToCloseTimeout.IsNone then failwithf "child workflows must specify execution timeout"
         if child.TaskStartToCloseTimeout.IsNone then failwithf "child workflows must specify decision task timeout"
-        if child.ChildPolicy.IsNone then failwithf "child workflows must specify child policy"
+        if child.ChildPolicy.IsNone then failwithf "child workflows must specify child policy"    
 
-    member private this.Append (toAction : 'a -> StageAction, item : 'a) = 
+    member private this.Append (toStageAction : 'a -> StageAction, args : 'a) = 
         let id = stages.Length
-        let stage = { StageNumber = id; Action = toAction item }
+        let stage = { StageNumber = id; Action = toStageAction args }
         Workflow(domain, name, description, version, taskList.Name, 
-                 stage :: stages,
-                 ?taskStartToCloseTimeout = taskStartToCloseTimeout,
-                 ?execStartToCloseTimeout = execStartToCloseTimeout,
-                 ?childPolicy             = childPolicy,
-                 ?identity                = identity,
-                 maxAttempts              = maxAttempts)         
-               
+                    stage :: stages,
+                    ?taskStartToCloseTimeout = taskStartToCloseTimeout,
+                    ?execStartToCloseTimeout = execStartToCloseTimeout,
+                    ?childPolicy             = childPolicy,
+                    ?identity                = identity,
+                    maxAttempts              = maxAttempts)
+
     // #region Public Events
 
     [<CLIEvent>] member this.OnDecisionTaskError = onDecisionTaskError.Publish
@@ -470,14 +500,10 @@ type Workflow (domain, name, description, version, ?taskList,
         member this.TaskStartToCloseTimeout      = taskStartToCloseTimeout
         member this.ExecutionStartToCloseTimeout = execStartToCloseTimeout
         member this.ChildPolicy                  = childPolicy
-                 
-        member this.Start swfClt = 
-            register swfClt |> ignore
-            startDecisionWorker  swfClt
-            startActivityWorkers swfClt
-            startChildWorkflows  swfClt 
-    
-    member this.NumberOfStages               = stages.Length
+        member this.Start swfClt                 = start swfClt
+                
+    member this.NumberOfStages                   = stages.Length
+    member this.Start swfClt                     = start swfClt
 
     // #region Operators
 

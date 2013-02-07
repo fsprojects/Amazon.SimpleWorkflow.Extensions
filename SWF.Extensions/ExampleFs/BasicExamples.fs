@@ -1,6 +1,7 @@
 ﻿module BasicExamples
 
 open System
+open System.Collections.Generic
 
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Extensions.Model
@@ -177,5 +178,48 @@ let failedWorkflowWithChildWorkflow =
              taskStartToCloseTimeout = 30,
              childPolicy = ChildPolicy.Terminate)
     ++> alwaysFailChildWorkflow
+
+// #endregion
+
+// #region Concurrent Activities example
+// you can specify a number of activities to be run in parallel, the next stage of the workflow
+// is triggered when all the parallel activities had completed successfully and their results
+// aggregated into a single input using the supplied reducer
+
+let echoActivity = Activity("echo", "echo", echo,
+                            taskHeartbeatTimeout       = 60, 
+                            taskScheduleToStartTimeout = 10,
+                            taskStartToCloseTimeout    = 10, 
+                            taskScheduleToCloseTimeout = 20)
+
+let greetActivity = Activity("greet", "greet", greet "Yan",
+                             taskHeartbeatTimeout       = 60, 
+                             taskScheduleToStartTimeout = 10,
+                             taskStartToCloseTimeout    = 10, 
+                             taskScheduleToCloseTimeout = 20)
+
+let byeActivity = Activity("bye", "bye", bye "Yan",
+                           taskHeartbeatTimeout       = 60, 
+                           taskScheduleToStartTimeout = 10,
+                           taskStartToCloseTimeout    = 10, 
+                           taskScheduleToCloseTimeout = 20)
+
+let reducer (results : Dictionary<int, string>) =
+    results |> Seq.map (fun kvp -> sprintf "Activity %d says [%s]" kvp.Key kvp.Value)
+            |> (fun arr -> String.Join(";", arr))
+
+let activities = 
+    [| 
+           echoActivity  :> ISchedulable
+           greetActivity :> ISchedulable
+           byeActivity   :> ISchedulable 
+    |]
+
+let parallelActivities = 
+    Workflow(domain = "theburningmonk.com", name = "parallel_activities", 
+             description = "this workflow runs several activities in parallel", 
+             version = "1")
+    ++> (activities, reducer)
+    ++> echoActivity
 
 // #endregion
