@@ -31,3 +31,9 @@ The goal of this project is to provide a framework that allows you to design and
 
 ###Example usages
 Check out the [Wiki](https://github.com/theburningmonk/Amazon.SimpleWorkflow.Extensions/wiki) page for a list of examples.
+
+###Nuget
+Download and install using [NuGet](https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions).
+
+<a href="https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions"><img src="http://theburningmonk.com/images/swf-extension-nuget-install.png" alt="NuGet package"/></a>
+
