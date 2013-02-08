@@ -79,7 +79,7 @@ type Stage =
 type WorkflowState =
     {
         mutable CurrentStageNumber  : int   // zero-based index of the currently executing stage
-        mutable TotalActions        : int   // total number of actions scheduled at this stage
+        mutable NumberOfActions     : int   // number of actions scheduled at this stage
         mutable Results             : Dictionary<int, string>   // the results from the actions so far
     }
 
@@ -109,11 +109,18 @@ module WorkflowUtils =
         | { EventType = ActivityTaskTimedOut _ } 
         | { EventType = ActivityTaskCompleted _ }
         | { EventType = ChildWorkflowExecutionFailed _ } 
-        | { EventType = ChildWorkflowExecutionCompleted _ } 
+        | { EventType = ChildWorkflowExecutionTimedOut _ } 
         | { EventType = ChildWorkflowExecutionCompleted _ }
         | { EventType = StartChildWorkflowExecutionInitiated _ }
         | { EventType = WorkflowExecutionStarted _ }
             -> Some historyEvt.EventType
+        | _ -> None
+
+    /// Returns the result from a scheduled action
+    let (|ActionResult|_|) = function
+        | { EventType = ActivityTaskCompleted(initEvtId, _, result) }
+        | { EventType = ChildWorkflowExecutionCompleted(initEvtId, _, _, _, result) } 
+            -> Some <| (initEvtId, result)
         | _ -> None
 
     /// Given an array of ISchedulable, returns the activities
@@ -124,7 +131,7 @@ module WorkflowUtils =
 
     /// Formats the activity ID for an activity given its current state
     let getActionId actionName { StageNumber = stageNum; AttemptNumber = attempts; ActionNumber = actionNum } = 
-        sprintf "%d.stag_%s.act_%d.attempt_%d" stageNum actionName actionNum attempts
+        sprintf "%s.stag_%d.act_%d.attempt_%d" actionName stageNum actionNum attempts
 
     /// Formats the activity version for an activity at a particular stage of a workflow
     let getActivityVersion workflowName stageNum = sprintf "%s.%d" workflowName stageNum
@@ -135,6 +142,23 @@ module WorkflowUtils =
             | { EventId = eventId'; EventType = eventType } when eventId = eventId' 
                 -> Some eventType 
             | _ -> None)
+
+    /// Returns the results from schedulable actions (activity & workflow) for a given stage number
+    let getStageResults stageNum (evts : HistoryEvent seq) =
+        evts 
+        |> Seq.choose (function 
+            | ActionResult (initEvtId, result) ->
+                // get the action number from the state of the scheduled action
+                let initEvtType = findEventTypeById initEvtId evts
+                match initEvtType with
+                | ActivityTaskScheduled(_, _, _, _, Some control, _, _, _, _, _)
+                | StartChildWorkflowExecutionInitiated(_, _, _, _, _, _, _, Some control, _, _)
+                    -> let state = deserializeSchedulableState control
+                       Some(state.StageNumber, state.ActionNumber, result)
+                | _ -> None
+            | _ -> None)
+        |> Seq.takeWhile (fun (stageNum', _, _) -> stageNum' = stageNum)
+        |> Seq.toArray
 
     /// Returns the decision to schedule an activity
     let scheduleActivity actionNum totalActions workflowName stageNum (activity : IActivity) input attempts = 
@@ -347,10 +371,10 @@ type Workflow (domain, name, description, version, ?taskList,
         match getStage stageNum with
         | Some({ Action = ScheduleActivity(activity) }) 
                -> [| scheduleActivityStage name stageNum activity input attempts |],
-                  serializeWorkflowState { CurrentStageNumber = stageNum; TotalActions = 1; Results = new Dictionary<int, string>() }
+                  serializeWorkflowState { CurrentStageNumber = stageNum; NumberOfActions = 1; Results = new Dictionary<int, string>() }
         | Some({ Action = StartChildWorkflow(workflow) }) 
                -> [| scheduleChildWorkflowStage stageNum workflow input attempts |], 
-                  serializeWorkflowState { CurrentStageNumber = stageNum; TotalActions = 1; Results = new Dictionary<int, string>() }
+                  serializeWorkflowState { CurrentStageNumber = stageNum; NumberOfActions = 1; Results = new Dictionary<int, string>() }
         | Some({ Action = ParallelActions(actions, _) })
                -> let totalActions = actions.Length
                   
@@ -360,31 +384,34 @@ type Workflow (domain, name, description, version, ?taskList,
                       | :? IActivity as activity -> scheduleActivity i totalActions name stageNum activity input attempts
                       | :? IWorkflow as workflow -> scheduleChildWorkflow i totalActions stageNum workflow input attempts)
 
-                  decisions, serializeWorkflowState { CurrentStageNumber = stageNum; TotalActions = totalActions; Results = new Dictionary<int, string>() }
+                  decisions, serializeWorkflowState { CurrentStageNumber = stageNum; NumberOfActions = totalActions; Results = new Dictionary<int, string>() }
         | None -> onWorkflowCompleted.Trigger(domain, name)
                   [| CompleteWorkflowExecution input |], ""
 
     let decide (swfClient : AmazonSimpleWorkflowClient, task : DecisionTask) =
+        let getLastExecContext () =
+            let req = DescribeWorkflowExecutionRequest(Domain = domain, Execution = task.WorkflowExecution)
+            let res = swfClient.DescribeWorkflowExecution(req)
+            res.DescribeWorkflowExecutionResult.WorkflowExecutionDetail.LatestExecutionContext
+
         // makes the next move based on the control data for the previous step and its result
         let nextStep (Some control) result =
             let state = deserializeSchedulableState control
 
-            // if there are more than one action scheduled at once, then check if they're all completed before
+            // if there are more than one action scheduled in parallel, then check if they're all completed before
             // attempting to schedule the next stage
             if state.TotalActions > 1 
-            then 
-                let req = DescribeWorkflowExecutionRequest(Domain = domain, Execution = task.WorkflowExecution)
-                let res = swfClient.DescribeWorkflowExecution(req)
-
-                // get the latest workflow state
-                let latestExecCtx = res.DescribeWorkflowExecutionResult.WorkflowExecutionDetail.LatestExecutionContext
-                let wfState = deserializeWorkflowState latestExecCtx
+            then
+                let wfState = deserializeWorkflowState <| getLastExecContext()
                 
-                wfState.Results.[state.ActionNumber] <- defaultArg result Unchecked.defaultof<string>
+                // get the results from the stage so far and update the results of the workflow
+                let stageResults = getStageResults state.StageNumber task.Events
+                stageResults |> Array.iter (fun (_, actionNum, result) -> 
+                    wfState.Results.[actionNum] <- defaultArg result Unchecked.defaultof<string>)
 
                 // if all the results are in, then aggregate them with the reducer and schedule the next stage
                 // otherwise, do nothing, and simply update the current workflow
-                if wfState.Results.Count = wfState.TotalActions 
+                if wfState.Results.Count = wfState.NumberOfActions 
                 then
                     let (Some stage) = getStage state.StageNumber
                     match stage with
@@ -411,11 +438,12 @@ type Workflow (domain, name, description, version, ?taskList,
             then [| FailWorkflowExecution(details, reason) |], ""
             else 
                 // we need to retry the failed ISchedulable
-                match schedulable with
-                | :? IActivity as activity -> 
-                    [| scheduleActivity state.ActionNumber state.TotalActions name state.StageNumber activity input state.AttemptNumber |], ""
-                | :? IWorkflow as workflow -> 
-                    [| scheduleChildWorkflow state.ActionNumber state.TotalActions state.StageNumber workflow input state.AttemptNumber |], ""                
+                let decision = match schedulable with
+                               | :? IActivity as activity -> 
+                                   scheduleActivity state.ActionNumber state.TotalActions name state.StageNumber activity input state.AttemptNumber
+                               | :? IWorkflow as workflow -> 
+                                   scheduleChildWorkflow state.ActionNumber state.TotalActions state.StageNumber workflow input state.AttemptNumber
+                [| decision |], getLastExecContext()
 
         let events = task.Events
         let keyEvt = events |> Seq.pick (function | KeyEvent evtType -> Some evtType | _ -> None)
@@ -442,13 +470,17 @@ type Workflow (domain, name, description, version, ?taskList,
             let (StartChildWorkflowExecutionInitiated(_, _, _, _, _, _, input, control, _, _)) = findEventTypeById initiatedEvtId events
             retryAction control workflowExec.RunId input details reason
 
+        | ChildWorkflowExecutionTimedOut(initiatedEvtId, _, workflowExec, _, timeoutType) ->
+            let (StartChildWorkflowExecutionInitiated(_, _, _, _, _, _, input, control, _, _)) = findEventTypeById initiatedEvtId events
+            retryAction control workflowExec.RunId input None (Some(sprintf "Timeout : %s" <| str timeoutType))
+
         | ChildWorkflowExecutionCompleted(initiatedEvtId, _, _, _, result) ->
             let (StartChildWorkflowExecutionInitiated(_, _, _, _, _, _, _, control, _, _)) = findEventTypeById initiatedEvtId events
             nextStep control result
 
         | StartChildWorkflowExecutionInitiated _ ->
             // we're still waiting for a child workflow to finish, do nothing for now
-            [||], ""
+            [||], getLastExecContext()
 
     let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decide, onDecisionTaskError.Trigger, ?identity = identity)
     let startActivityWorkers clt = 

@@ -31,7 +31,10 @@ let echo str = printfn "%s" str; str
 let echoWorkflow =
     Workflow(domain = "theburningmonk.com", name = "echo", 
              description = "simple echo example", 
-             version = "1")
+             version = "1",
+             execStartToCloseTimeout = 60, 
+             taskStartToCloseTimeout = 30,
+             childPolicy = ChildPolicy.Terminate)
     ++> Activity("echo", "echo input", echo,
                  taskHeartbeatTimeout       = 60, 
                  taskScheduleToStartTimeout = 10,
@@ -181,7 +184,7 @@ let failedWorkflowWithChildWorkflow =
 
 // #endregion
 
-// #region Concurrent Activities example
+// #region Parallel Activities example
 // you can specify a number of activities to be run in parallel, the next stage of the workflow
 // is triggered when all the parallel activities had completed successfully and their results
 // aggregated into a single input using the supplied reducer
@@ -223,3 +226,44 @@ let parallelActivities =
     ++> echoActivity
 
 // #endregion
+
+// #region Parallel Schedulables example
+// you can schedule a mixture of activities and child workflows in parallels
+
+let schedulables = 
+    [| 
+           echoActivity  :> ISchedulable
+           echoWorkflow  :> ISchedulable
+           childWorkflow :> ISchedulable
+           greetActivity :> ISchedulable
+    |]
+
+let parallelSchedulables = 
+    Workflow(domain = "theburningmonk.com", name = "parallel_schedulables", 
+             description = "this workflow runs several activities and workflows in parallel", 
+             version = "1")
+    ++> echoActivity
+    ++> (schedulables, reducer)
+    ++> echoActivity
+
+// #endregion
+
+// #region Parallel Schedulables with Error example
+// if one of the workflow/activities failed then the whole workflow fails
+
+let failedSchedulables = 
+    [| 
+           echoActivity  :> ISchedulable
+           echoWorkflow  :> ISchedulable
+           childWorkflow :> ISchedulable
+           greetActivity :> ISchedulable
+           failedWorkflowWithActivity :> ISchedulable
+    |]
+
+let failedParallelSchedulables = 
+    Workflow(domain = "theburningmonk.com", name = "failed_parallel_schedulables", 
+             description = "this workflow runs several activities and workflows in parallel and one of them fails", 
+             version = "1")
+    ++> echoActivity
+    ++> (failedSchedulables, reducer)
+    ++> echoActivity
