@@ -32,6 +32,11 @@ The goal of this project is to provide a framework that allows you to design and
 ###Example usages
 Check out the [Wiki](https://github.com/theburningmonk/Amazon.SimpleWorkflow.Extensions/wiki) page for a list of examples.
 
+I also have a series of introductory posts on how to use the library to model workflows:
+- [High Level Overview](http://theburningmonk.com/2013/02/making-amazon-simpleworkflow-simpler-to-work-with/)
+- [Part 1 - Hello World] (http://theburningmonk.com/2013/02/introduction-to-aws-simpleworkflow-extensions-part-1-hello-world-example/)
+- [Part 2 - Beyond Hello World] (http://theburningmonk.com/2013/02/introduction-to-aws-simpleworkflow-extensions-part-2-beyond-hello-world/)
+
 ###Nuget
 Download and install using [NuGet](https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions).
 
