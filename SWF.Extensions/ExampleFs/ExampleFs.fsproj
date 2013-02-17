@@ -52,6 +52,7 @@
   <ItemGroup>
     <Compile Include="BasicExamples.fs" />
     <None Include="Run.fsx" />
+    <None Include="CountHtmlElements.fsx" />
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
