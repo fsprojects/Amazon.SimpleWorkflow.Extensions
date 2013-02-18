@@ -34,14 +34,17 @@ type DecisionWorker private (
                 pollReq.WithIdentity    <-? identity
 
                 let! pollRes = clt.PollForDecisionTaskAsync(pollReq)
-                let task = DecisionTask(pollRes.PollForDecisionTaskResult.DecisionTask, clt, domain, tasklist)
+                match pollRes.PollForDecisionTaskResult.DecisionTask.TaskToken with
+                | null -> ()
+                | _ ->
+                    let task = DecisionTask(pollRes.PollForDecisionTaskResult.DecisionTask, clt, domain, tasklist)
 
-                let decisions, execContext = decide(clt, task) |> (fun (decisions, cxt) -> decisions |> Array.map (fun x -> x.ToSwfDecision()), cxt)
-                let req = RespondDecisionTaskCompletedRequest()
-                            .WithTaskToken(task.TaskToken)
-                            .WithDecisions(decisions)
-                            .WithExecutionContext(execContext)
-                do! clt.RespondDecisionTaskCompletedAsync(req) |> Async.Ignore
+                    let decisions, execContext = decide(clt, task) |> (fun (decisions, cxt) -> decisions |> Array.map (fun x -> x.ToSwfDecision()), cxt)
+                    let req = RespondDecisionTaskCompletedRequest()
+                                .WithTaskToken(task.TaskToken)
+                                .WithDecisions(decisions)
+                                .WithExecutionContext(execContext)
+                    do! clt.RespondDecisionTaskCompletedAsync(req) |> Async.Ignore
             with exn -> 
                 // invoke the supplied exception handler
                 onExn(exn)                
