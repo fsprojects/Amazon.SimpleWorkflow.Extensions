@@ -43,5 +43,7 @@ Download and install using [NuGet](https://nuget.org/packages/Amazon.SimpleWorkf
 
 <a href="https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions"><img src="http://theburningmonk.com/images/swf-extension-nuget-install.png" alt="NuGet package"/></a>
 
+You can view the full release notes [here](https://github.com/theburningmonk/Amazon.SimpleWorkflow.Extensions/wiki/Release-Notes).
+
 ###Keep in touch
 Please follow the official twitter account [@swf_extensions](https://twitter.com/swf_extensions) for updates, and feel free to send me any feedbacks or questions you have about the project :-)
