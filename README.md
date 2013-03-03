@@ -37,6 +37,8 @@ I also have a series of introductory posts on how to use the library to model wo
 - [Part 1 - Hello World] (http://theburningmonk.com/2013/02/introduction-to-aws-simpleworkflow-extensions-part-1-hello-world-example/)
 - [Part 2 - Beyond Hello World] (http://theburningmonk.com/2013/02/introduction-to-aws-simpleworkflow-extensions-part-2-beyond-hello-world/)
 - [Part 3 - Parallelizing activities] (http://theburningmonk.com/2013/02/introduction-to-aws-simpleworkflow-extensions-part-3-parallelizing-activities/)
+- Part 4 - Child Workflows (coming soon)
+- Part 5 - Retries (coming soon)
 
 ###Nuget
 Download and install using [NuGet](https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions).
