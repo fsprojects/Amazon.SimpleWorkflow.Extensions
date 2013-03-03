@@ -11,7 +11,7 @@ open System.Runtime.InteropServices
 
 [<assembly: AssemblyProduct("Amazon.SimpleWorkflow.Extensions")>]
 [<assembly: AssemblyCopyright("Copyright @ Yan Cui 2013")>]
-[<assembly: AssemblyVersion("1.0.3")>]
-[<assembly: AssemblyFileVersion("1.0.3")>]
+[<assembly: AssemblyVersion("1.0.4")>]
+[<assembly: AssemblyFileVersion("1.0.4")>]
 
 do ()
