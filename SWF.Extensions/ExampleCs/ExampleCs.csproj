@@ -52,10 +52,16 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="App.config" />
+    <None Include="App.config">
+      <SubType>Designer</SubType>
+    </None>
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\SWF.Extensions.CoreCs\SWF.Extensions.CoreCs.csproj">
+      <Project>{9b2e5bfd-6936-4351-8185-74a3ee03c9a9}</Project>
+      <Name>SWF.Extensions.CoreCs</Name>
+    </ProjectReference>
     <ProjectReference Include="..\SWF.Extensions.Core\SWF.Extensions.Core.fsproj">
       <Project>{1bfec7f3-ef41-468f-bdd8-3f0edb99b20a}</Project>
       <Name>SWF.Extensions.Core</Name>

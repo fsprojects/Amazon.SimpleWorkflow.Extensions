@@ -232,17 +232,6 @@ type Activity<'TInput, 'TOutput>(name, description,
     // use Json serializer to marshall the input and output from-and-to string
     let processor = inputSerializer.DeserializeFromString >> processor >> outputSerializer.SerializeToString
     
-    // C# friendly constructor which takes in a Func instead of function
-    new(name, description, processor : Func<'TInput, 'TOutput>,
-        taskHeartbeatTimeout, taskScheduleToStartTimeout, taskStartToCloseTimeout, taskScheduleToCloseTimeout,
-        ?taskList) = 
-            Activity<'TInput, 'TOutput>(name, description, (fun input -> processor.Invoke(input)),
-                                        taskHeartbeatTimeout,
-                                        taskScheduleToStartTimeout,
-                                        taskStartToCloseTimeout,
-                                        taskScheduleToCloseTimeout,
-                                        ?taskList = taskList)
-
     interface IActivity with
         member this.Name                        = name
         member this.Description                 = description

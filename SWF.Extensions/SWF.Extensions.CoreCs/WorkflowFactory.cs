@@ -1,12 +1,31 @@
-﻿using SWF.Extensions.CoreCs.Builders;
+﻿using System;
 
-namespace SWF.Extensions.CoreCs
+using Amazon.SimpleWorkflow.Extensions.CoreCS.Builders;
+
+namespace Amazon.SimpleWorkflow.Extensions.CoreCS
 {
-    public class WorkflowFactory
+    public static class WorkflowFactory
     {
-        public IWorkflowBuilder Create(string domain, string name, string version)
+        public static IWorkflowBuilder CreateWorkflow(string domain, string name, string version)
         {
             return new WorkflowBuilderImpl(domain, name, version);
+        }
+
+        public static IActivityBuilder<TInput, TOutput> CreateActivity<TInput, TOutput>(
+            string name,
+            Func<TInput, TOutput> processor,
+            int taskHeartbeatTimeout,
+            int taskScheduleToStartTimeout,
+            int taskStartToCloseTimeout,
+            int taskScheduleToCloseTimeout)
+        {
+            return new ActivityBuilderImpl<TInput, TOutput>(
+                        name, 
+                        processor, 
+                        taskHeartbeatTimeout, 
+                        taskScheduleToStartTimeout,
+                        taskStartToCloseTimeout,
+                        taskScheduleToCloseTimeout);
         }
     }
 }

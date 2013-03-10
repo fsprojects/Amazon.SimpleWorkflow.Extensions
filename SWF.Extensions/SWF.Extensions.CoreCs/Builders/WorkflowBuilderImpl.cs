@@ -1,7 +1,17 @@
-﻿namespace SWF.Extensions.CoreCs.Builders
+﻿using System;
+using System.Collections.Generic;
+
+using Amazon.SimpleWorkflow.Extensions.CoreCs;
+
+using Microsoft.FSharp.Collections;
+using Microsoft.FSharp.Core;
+
+namespace Amazon.SimpleWorkflow.Extensions.CoreCS.Builders
 {
     internal sealed class WorkflowBuilderImpl : IWorkflowBuilder
     {
+        private readonly List<Stage> stages = new List<Stage>();
+
         public WorkflowBuilderImpl(string domain, string name, string version)
         {
             Domain = domain;
@@ -73,6 +83,74 @@
         {
             MaxAttempts = maxAttempts;
             return this;
+        }
+
+        public IWorkflowBuilder Attach(ISchedulable schedulable)
+        {
+            StageAction stageAction;
+            if (schedulable is IActivity)
+            {
+                stageAction = StageAction.NewScheduleActivity((IActivity)schedulable);
+            }
+            else if (schedulable is IWorkflow)
+            {
+                stageAction = StageAction.NewStartChildWorkflow((IWorkflow)schedulable);
+            }
+            else
+            {
+                throw new NotSupportedException(string.Format(
+                    "Type [{0}] is not a supported schedulable action",
+                    schedulable.GetType()));
+            }
+
+            var stage = new Stage(stages.Count, stageAction);
+            stages.Add(stage);
+
+            return this;
+        }
+
+        public IWorkflowBuilder Attach(ISchedulable[] schedulables, Func<Dictionary<int, string>, string> reducer)
+        {
+            var fsharpReducer = FuncConvert.ToFSharpFunc(new Converter<Dictionary<int, string>, string>(reducer));
+            var stageAction = StageAction.NewParallelActions(schedulables, fsharpReducer);
+            var stage = new Stage(stages.Count, stageAction);
+            stages.Add(stage);
+
+            return this;
+        }
+
+        public IWorkflow Complete()
+        {
+            return new Workflow(
+                    Domain,
+                    Name,
+                    Description,
+                    Version,
+                    TaskList.AsOption(string.IsNullOrWhiteSpace),
+                    ListModule.OfSeq(stages).AsOption(),
+                    TaskStartToCloseTimeout.AsOption(),
+                    ExecutionStartToCloseTimeout.AsOption(),
+                    GetChildPolicy(ChildPolicy).AsOption(),
+                    Identity.AsOption(string.IsNullOrWhiteSpace),
+                    MaxAttempts.AsOption());
+        }
+
+        /// <summary>
+        /// Converts the more C# friendly ChildPolicyEnum representation to the F# DU type
+        /// </summary>
+        private static Model.ChildPolicy GetChildPolicy(ChildPolicyEnum childPolicyEnum)
+        {
+            switch (childPolicyEnum)
+            {
+                case ChildPolicyEnum.Terminate:
+                    return Model.ChildPolicy.Terminate;
+                case ChildPolicyEnum.Abandon:
+                    return Model.ChildPolicy.Abandon;
+                case ChildPolicyEnum.RequestCancel:
+                    return Model.ChildPolicy.RequestCancel;
+                default:
+                    throw new NotSupportedException(string.Format("ChildPolicyEnum [{0}] is not supported", childPolicyEnum));
+            }
         }
     }
 }

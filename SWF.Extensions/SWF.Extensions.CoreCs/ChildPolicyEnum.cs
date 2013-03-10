@@ -1,10 +1,9 @@
-﻿namespace SWF.Extensions.CoreCs
+﻿namespace Amazon.SimpleWorkflow.Extensions.CoreCs
 {
     public enum ChildPolicyEnum
     {
-        Undefined = 0,
-        Terminate = 1,
-        RequestCancel = 2,
-        Abandon = 3
+        Terminate = 0,
+        RequestCancel = 1,
+        Abandon = 2
     }
 }

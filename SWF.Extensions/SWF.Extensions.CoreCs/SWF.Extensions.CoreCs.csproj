@@ -7,7 +7,7 @@
     <ProjectGuid>{9B2E5BFD-6936-4351-8185-74A3EE03C9A9}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>SWF.Extensions.CoreCs</RootNamespace>
+    <RootNamespace>Amazon.SimpleWorkflow.Extensions.CoreCS</RootNamespace>
     <AssemblyName>SWF.Extensions.CoreCs</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
@@ -40,10 +40,10 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Builders\ActivityBuilderImpl.cs" />
+    <Compile Include="Builders\IActivityBuilder.cs" />
     <Compile Include="Builders\IWorkflowBuilder.cs" />
-    <Compile Include="Builders\IWorkflowStageBuilder.cs" />
     <Compile Include="Builders\WorkflowBuilderImpl.cs" />
-    <Compile Include="Builders\WorkflowStageBuilderImpl.cs" />
     <Compile Include="ChildPolicyEnum.cs" />
     <Compile Include="FSharpOptionExtensions.cs" />
     <Compile Include="WorkflowFactory.cs" />
