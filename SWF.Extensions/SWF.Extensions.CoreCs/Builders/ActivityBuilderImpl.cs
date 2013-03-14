@@ -2,7 +2,7 @@
 
 using Microsoft.FSharp.Core;
 
-namespace Amazon.SimpleWorkflow.Extensions.CoreCS.Builders
+namespace Amazon.SimpleWorkflow.Extensions.Builders
 {
     internal sealed class ActivityBuilderImpl<TInput, TOutput> : IActivityBuilder<TInput, TOutput>
     {

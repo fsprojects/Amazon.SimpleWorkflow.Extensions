@@ -1,8 +1,8 @@
 ﻿using System;
 
-using Amazon.SimpleWorkflow.Extensions.CoreCS.Builders;
+using Amazon.SimpleWorkflow.Extensions.Builders;
 
-namespace Amazon.SimpleWorkflow.Extensions.CoreCS
+namespace Amazon.SimpleWorkflow.Extensions
 {
     public static class WorkflowFactory
     {

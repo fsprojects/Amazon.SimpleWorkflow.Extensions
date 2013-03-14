@@ -1,7 +1,7 @@
 ﻿using System;
 using Microsoft.FSharp.Core;
 
-namespace Amazon.SimpleWorkflow.Extensions.CoreCS
+namespace Amazon.SimpleWorkflow.Extensions
 {
     /// <summary>
     /// Extension methods for working with F#'s option type

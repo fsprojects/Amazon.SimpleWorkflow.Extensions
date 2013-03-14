@@ -5,7 +5,7 @@ using System.Net;
 using System.Threading;
 
 using Amazon.SimpleWorkflow;
-using Amazon.SimpleWorkflow.Extensions.CoreCS;
+using Amazon.SimpleWorkflow.Extensions;
 
 namespace ExampleCs
 {

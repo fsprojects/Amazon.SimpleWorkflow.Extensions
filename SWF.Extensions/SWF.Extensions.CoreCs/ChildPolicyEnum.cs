@@ -1,4 +1,4 @@
-﻿namespace Amazon.SimpleWorkflow.Extensions.CoreCs
+﻿namespace Amazon.SimpleWorkflow.Extensions
 {
     public enum ChildPolicyEnum
     {

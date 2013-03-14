@@ -1,9 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 
-using Amazon.SimpleWorkflow.Extensions.CoreCs;
-
-namespace Amazon.SimpleWorkflow.Extensions.CoreCS.Builders
+namespace Amazon.SimpleWorkflow.Extensions.Builders
 {
     /// <summary>
     /// Represents a builder for gradually building up the skeletons of a workflow

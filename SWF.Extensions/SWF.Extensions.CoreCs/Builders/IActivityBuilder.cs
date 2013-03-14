@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace Amazon.SimpleWorkflow.Extensions.CoreCS.Builders
+namespace Amazon.SimpleWorkflow.Extensions.Builders
 {
     /// <summary>
     /// Represents a builder for gradually building up the skeletons of an activity

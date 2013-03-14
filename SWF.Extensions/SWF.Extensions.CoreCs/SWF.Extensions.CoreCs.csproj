@@ -7,7 +7,7 @@
     <ProjectGuid>{9B2E5BFD-6936-4351-8185-74A3EE03C9A9}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>Amazon.SimpleWorkflow.Extensions.CoreCS</RootNamespace>
+    <RootNamespace>Amazon.SimpleWorkflow.Extensions</RootNamespace>
     <AssemblyName>SWF.Extensions.CoreCs</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>

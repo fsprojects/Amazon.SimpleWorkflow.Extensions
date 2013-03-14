@@ -1,12 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 
-using Amazon.SimpleWorkflow.Extensions.CoreCs;
-
 using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 
-namespace Amazon.SimpleWorkflow.Extensions.CoreCS.Builders
+namespace Amazon.SimpleWorkflow.Extensions.Builders
 {
     internal sealed class WorkflowBuilderImpl : IWorkflowBuilder
     {
