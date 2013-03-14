@@ -134,7 +134,7 @@ module WorkflowUtils =
         sprintf "%s.stag_%d.act_%d.attempt_%d" actionName stageNum actionNum attempts
 
     /// Formats the activity version for an activity at a particular stage of a workflow
-    let getActivityVersion workflowName stageNum = sprintf "%s.%d" workflowName stageNum
+    let getActivityVersion workflowName workflowVersion stageNum = sprintf "%s.v%s.%d" workflowName workflowVersion stageNum
     
     /// Returns the event type associated with the specified event ID
     let findEventTypeById eventId (evts : HistoryEvent seq) =
@@ -161,8 +161,8 @@ module WorkflowUtils =
         |> Seq.toArray
 
     /// Returns the decision to schedule an activity
-    let scheduleActivity actionNum totalActions workflowName stageNum (activity : IActivity) input attempts = 
-        let activityType = ActivityType(Name = activity.Name, Version = getActivityVersion workflowName stageNum)
+    let scheduleActivity actionNum totalActions workflowName workflowVersion stageNum (activity : IActivity) input attempts = 
+        let activityType = ActivityType(Name = activity.Name, Version = getActivityVersion workflowName workflowVersion stageNum)
         let state        = { 
                                 StageNumber   = stageNum
                                 AttemptNumber = attempts + 1
@@ -298,9 +298,9 @@ type Workflow (domain, name, description, version, ?taskList,
             let activities = stages 
                              |> List.collect (function 
                                 | { StageNumber = stageNum; Action = ScheduleActivity(activity) }
-                                    -> [ (stageNum, activity, getActivityVersion name stageNum) ]
+                                    -> [ (stageNum, activity, getActivityVersion name version stageNum) ]
                                 | { StageNumber = stageNum; Action = ParallelActions(arr, _) }
-                                    -> let activityVersion = getActivityVersion name stageNum
+                                    -> let activityVersion = getActivityVersion name version stageNum
                                        arr |> getActivities |> Array.map (fun activity -> stageNum, activity, activityVersion) |> Array.toList
                                 | _ -> [])
                              |> List.filter (fun (_, activity, version) -> not <| existing.Contains(activity.Name, version))
@@ -359,7 +359,7 @@ type Workflow (domain, name, description, version, ?taskList,
     let scheduleStage stageNum input attempts =
         match getStage stageNum with
         | Some({ Action = ScheduleActivity(activity) }) 
-               -> [| scheduleActivityStage name stageNum activity input attempts |],
+               -> [| scheduleActivityStage name version stageNum activity input attempts |],
                   serializeWorkflowState { CurrentStageNumber = stageNum; NumberOfActions = 1; Results = new Dictionary<int, string>() }
         | Some({ Action = StartChildWorkflow(workflow) }) 
                -> [| scheduleChildWorkflowStage stageNum workflow input attempts |], 
@@ -370,7 +370,7 @@ type Workflow (domain, name, description, version, ?taskList,
                   // collect all the decisions required to schedule the stage
                   let decisions = actions |> Array.mapi (fun i x -> 
                       match x with
-                      | :? IActivity as activity -> scheduleActivity i totalActions name stageNum activity input attempts
+                      | :? IActivity as activity -> scheduleActivity i totalActions name version stageNum activity input attempts
                       | :? IWorkflow as workflow -> scheduleChildWorkflow i totalActions stageNum workflow input attempts)
 
                   decisions, serializeWorkflowState { CurrentStageNumber = stageNum; NumberOfActions = totalActions; Results = new Dictionary<int, string>() }
@@ -429,7 +429,7 @@ type Workflow (domain, name, description, version, ?taskList,
                 // we need to retry the failed ISchedulable
                 let decision = match schedulable with
                                | :? IActivity as activity -> 
-                                   scheduleActivity state.ActionNumber state.TotalActions name state.StageNumber activity input state.AttemptNumber
+                                   scheduleActivity state.ActionNumber state.TotalActions name version state.StageNumber activity input state.AttemptNumber
                                | :? IWorkflow as workflow -> 
                                    scheduleChildWorkflow state.ActionNumber state.TotalActions state.StageNumber workflow input state.AttemptNumber
                 [| decision |], getLastExecContext()

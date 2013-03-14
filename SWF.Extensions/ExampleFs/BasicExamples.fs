@@ -8,7 +8,7 @@ open Amazon.SimpleWorkflow.Extensions.Model
 
 // #region Hello World example
 
-let sayHelloWorld _ = printfn "Hello World!"; ""
+let sayHelloWorld _ = printfn "Hello World!"; "Hello World!"
 
 /// workflow which has only one activity - to print hello world when received an activity task
 let helloWorldWorkflow =
