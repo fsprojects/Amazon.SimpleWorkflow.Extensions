@@ -3,6 +3,7 @@
 
 open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Extensions
+open Amazon.SimpleWorkflow.Extensions.Model
 
 open System.Collections.Generic
 open System.Net
@@ -61,13 +62,31 @@ let countReducer (results : Dictionary<int, string>) =
 let countElementsWorkflow = 
     Workflow(domain = "theburningmonk.com", name = "count_html_elements", 
              description = "this workflow counts HTML elements", 
-             version = "1")
-    ++> echoActivity
+             version = "1",
+             execStartToCloseTimeout = 60, 
+             taskStartToCloseTimeout = 30,
+             childPolicy = ChildPolicy.Terminate)
     ++> (countActivities, countReducer)
     ++> echoActivity
+
+let getUrl _ = 
+    printfn "Enter URL to count HTML elements:"
+    sprintf "http://%s" "bing.com"
+
+let mainWorkflow =
+    Workflow(domain = "theburningmonk.com", name = "count_html_elements_for_input",
+             description = "this workflow counts HTML elements for the website of a given input",
+             version = "1")
+    ++> Activity("get_url", "gets a URL from the user",
+                 getUrl,
+                 taskHeartbeatTimeout       = 60, 
+                 taskScheduleToStartTimeout = 10,
+                 taskStartToCloseTimeout    = 60,  // you have one minute to enter input ;-)
+                 taskScheduleToCloseTimeout = 70)
+    ++> countElementsWorkflow
 
 let awsKey      = "PUT-YOUR-AWS-KEY-HERE"
 let awsSecret   = "PUT-YOUR-AWS-SECRET-HERE"
 let client = new AmazonSimpleWorkflowClient(awsKey, awsSecret)
 
-countElementsWorkflow.Start(client)
+mainWorkflow.Start(client)
