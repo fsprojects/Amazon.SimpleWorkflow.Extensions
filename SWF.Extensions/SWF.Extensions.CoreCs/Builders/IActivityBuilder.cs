@@ -9,6 +9,8 @@ namespace Amazon.SimpleWorkflow.Extensions.Builders
     {
         string Name { get; }
 
+        string Version { get; }
+
         string Description { get; }
 
         string TaskList { get; }
@@ -44,5 +46,7 @@ namespace Amazon.SimpleWorkflow.Extensions.Builders
         /// Finish editing the activity
         /// </summary>
         IActivity Complete();
+
+        IActivityBuilder<TInput, TOutput> WithVersion(string version);
     }
 }

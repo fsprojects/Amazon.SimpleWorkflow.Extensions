@@ -22,6 +22,7 @@ type ISchedulable =
 type IActivity =
     inherit ISchedulable
 
+    abstract member Version                     : string option
     abstract member TaskList                    : TaskList    
     abstract member TaskHeartbeatTimeout        : Seconds
     abstract member TaskScheduleToStartTimeout  : Seconds
@@ -134,7 +135,10 @@ module WorkflowUtils =
         sprintf "%s.stag_%d.act_%d.attempt_%d" actionName stageNum actionNum attempts
 
     /// Formats the activity version for an activity at a particular stage of a workflow
-    let getActivityVersion workflowName workflowVersion stageNum = sprintf "%s.v%s.%d" workflowName workflowVersion stageNum
+    let getActivityVersion workflowName workflowVersion stageNum (activity : IActivity) = 
+        match activity.Version with
+        | Some v -> sprintf "%s.v%s.%d.v%s" workflowName workflowVersion stageNum v
+        | _      -> sprintf "%s.v%s.%d" workflowName workflowVersion stageNum
     
     /// Returns the event type associated with the specified event ID
     let findEventTypeById eventId (evts : HistoryEvent seq) =
@@ -162,7 +166,7 @@ module WorkflowUtils =
 
     /// Returns the decision to schedule an activity
     let scheduleActivity actionNum totalActions workflowName workflowVersion stageNum (activity : IActivity) input attempts = 
-        let activityType = ActivityType(Name = activity.Name, Version = getActivityVersion workflowName workflowVersion stageNum)
+        let activityType = ActivityType(Name = activity.Name, Version = getActivityVersion workflowName workflowVersion stageNum activity)
         let state        = { 
                                 StageNumber   = stageNum
                                 AttemptNumber = attempts + 1
@@ -221,6 +225,7 @@ type Activity<'TInput, 'TOutput>(name, description,
                                  taskScheduleToStartTimeout  : Seconds,
                                  taskStartToCloseTimeout     : Seconds,
                                  taskScheduleToCloseTimeout  : Seconds,
+                                 ?version,
                                  ?taskList,
                                  ?maxAttempts) =
     let taskList    = defaultArg taskList (name + "TaskList")
@@ -234,6 +239,7 @@ type Activity<'TInput, 'TOutput>(name, description,
     
     interface IActivity with
         member this.Name                        = name
+        member this.Version                     = version
         member this.Description                 = description
         member this.TaskList                    = TaskList(Name = taskList)
         member this.TaskHeartbeatTimeout        = taskHeartbeatTimeout
@@ -298,10 +304,10 @@ type Workflow (domain, name, description, version, ?taskList,
             let activities = stages 
                              |> List.collect (function 
                                 | { StageNumber = stageNum; Action = ScheduleActivity(activity) }
-                                    -> [ (stageNum, activity, getActivityVersion name version stageNum) ]
+                                    -> [ (stageNum, activity, getActivityVersion name version stageNum activity) ]
                                 | { StageNumber = stageNum; Action = ParallelActions(arr, _) }
-                                    -> let activityVersion = getActivityVersion name version stageNum
-                                       arr |> getActivities |> Array.map (fun activity -> stageNum, activity, activityVersion) |> Array.toList
+                                    -> let getActivityVersion = getActivityVersion name version stageNum
+                                       arr |> getActivities |> Array.map (fun activity -> stageNum, activity, getActivityVersion activity) |> Array.toList
                                 | _ -> [])
                              |> List.filter (fun (_, activity, version) -> not <| existing.Contains(activity.Name, version))
                              |> Seq.distinctBy (fun (_, activity, version) -> activity.Name, version)
