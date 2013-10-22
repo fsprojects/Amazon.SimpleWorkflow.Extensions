@@ -138,7 +138,7 @@ type ActivityWorker private (
                 let req = RespondActivityTaskFailedRequest()
                             .WithTaskToken(task.TaskToken)
                             .WithReason(exn.Message)
-                            .WithDetails(exn.StackTrace)
+                            .WithDetails(exn.ToString())
                 do! clt.RespondActivityTaskFailedAsync(req) |> Async.Ignore
                 cts.Cancel()
         }
