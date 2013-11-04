@@ -288,13 +288,14 @@ type Workflow (domain, name, description, version, ?taskList,
             | { Action = ParallelActions(arr, _) }      -> arr |> getWorkflows |> Array.toList
             | _ -> [])
     
-    /// tries to get the nth (zero-index) stage
+    // tries to get the nth (zero-index) stage
     let getStage n = if n >= stages.Length then None else List.nth stages n |> Some
 
     // registers the workflow and activity types
     let register (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
         let registerActivities stages = async {
-            let req = ListActivityTypesRequest(Domain = domain).WithRegistrationStatus(string Registered)
+            let req  = ListActivityTypesRequest(Domain = domain)
+                            .WithRegistrationStatus(string Registered)
             let! res = clt.ListActivityTypesAsync(req)
 
             let existing = res.ListActivityTypesResult.ActivityTypeInfos.TypeInfos
@@ -501,12 +502,12 @@ type Workflow (domain, name, description, version, ?taskList,
         let id = stages.Length
         let stage = { StageNumber = id; Action = toStageAction args }
         Workflow(domain, name, description, version, taskList.Name, 
-                    stage :: stages,
-                    ?taskStartToCloseTimeout = taskStartToCloseTimeout,
-                    ?execStartToCloseTimeout = execStartToCloseTimeout,
-                    ?childPolicy             = childPolicy,
-                    ?identity                = identity,
-                    maxAttempts              = maxAttempts)
+                 stage :: stages,
+                 ?taskStartToCloseTimeout = taskStartToCloseTimeout,
+                 ?execStartToCloseTimeout = execStartToCloseTimeout,
+                 ?childPolicy             = childPolicy,
+                 ?identity                = identity,
+                 maxAttempts              = maxAttempts)
 
     // #region Public Events
 

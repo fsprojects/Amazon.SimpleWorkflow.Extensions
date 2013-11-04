@@ -737,7 +737,7 @@ type HistoryEvent =
         EventId     : EventId
         Timestamp   : DateTime
         EventType   : EventType
-    }    
+    }
     
     static member op_Explicit (evt : Amazon.SimpleWorkflow.Model.HistoryEvent) = 
         {
