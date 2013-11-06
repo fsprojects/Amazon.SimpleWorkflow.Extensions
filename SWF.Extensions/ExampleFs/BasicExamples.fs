@@ -6,13 +6,15 @@ open System.Collections.Generic
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Extensions.Model
 
+let domain = "theburningmonk.com"
+
 // #region Hello World example
 
 let sayHelloWorld _ = printfn "Hello World!"; "Hello World!"
 
 /// workflow which has only one activity - to print hello world when received an activity task
 let helloWorldWorkflow =
-    Workflow(domain = "theburningmonk.com", name = "hello_world", 
+    Workflow(domain = domain, name = "hello_world", 
              description = "simple 'hello world' example", 
              version = "1",
              identity = "Phantom") // you can optionally set the identity of your decision and activity workers
@@ -29,7 +31,7 @@ let helloWorldWorkflow =
 let echo str = printfn "%s" str; str
 
 let echoWorkflow =
-    Workflow(domain = "theburningmonk.com", name = "echo", 
+    Workflow(domain = domain, name = "echo", 
              description = "simple echo example", 
              version = "1",
              execStartToCloseTimeout = 60, 
@@ -48,7 +50,7 @@ let echoWorkflow =
 let sum (arr : int[]) = arr |> Array.sum |> double
 
 let genericActivityWorkflow =
-    Workflow(domain = "theburningmonk.com", name = "generic_activity", 
+    Workflow(domain = domain, name = "generic_activity", 
              description = "simple generic activity example", 
              version = "1")
     ++> Activity<int[], double>("sum", "sum int array into a double", sum,
@@ -68,7 +70,7 @@ let greet me you = printfn "%s: hello %s!" me you; you
 let bye me you = printfn "%s: good bye, %s!" me you; me
 
 let simplePipelineWorkflow =
-    Workflow(domain = "theburningmonk.com", name = "simple_pipeline", 
+    Workflow(domain = domain, name = "simple_pipeline", 
              description = "simple pipeline example", 
              version = "1")
     ++> Activity("greet", "say hello", greet "Yan",
@@ -95,7 +97,7 @@ let sing name = printfn "Old %s had a farm" name; "EE-I-EE-I-O"
 // unlike the main workflow, child workflows MUST specify the timeouts and child
 // policy on the workflow definition itself
 let childWorkflow = 
-    Workflow(domain = "theburningmonk.com", name = "sing_along", 
+    Workflow(domain = domain, name = "sing_along", 
              description = "child workflow to start a song", 
              version = "1",
              execStartToCloseTimeout = 60, 
@@ -109,7 +111,7 @@ let childWorkflow =
 
 // this is the main workflow which
 let withChildWorkflow =
-    Workflow(domain = "theburningmonk.com", name = "with_child_workflow", 
+    Workflow(domain = domain, name = "with_child_workflow", 
              description = "workflow which starts a child workflow in the middle", 
              version = "1")
     ++> Activity("greet", "say hello", greet "MacDonald",
@@ -139,7 +141,7 @@ let withChildWorkflow =
 let alwaysFail _ = failwith "oops"
 
 let failedWorkflowWithActivity = 
-    Workflow(domain = "theburningmonk.com", name = "failed_workflow_with_activity", 
+    Workflow(domain = domain, name = "failed_workflow_with_activity", 
              description = "this workflow will fail because of its activity", 
              version = "1",
              execStartToCloseTimeout = 60, 
@@ -160,7 +162,7 @@ let failedWorkflowWithActivity =
 // unlike the main workflow, child workflows MUST specify the timeouts and child
 // policy on the workflow definition itself
 let alwaysFailChildWorkflow = 
-    Workflow(domain = "theburningmonk.com", name = "failed_child_workflow", 
+    Workflow(domain = domain, name = "failed_child_workflow", 
              description = "this child workflow will always fail", 
              version = "1",
              execStartToCloseTimeout = 60, 
@@ -174,7 +176,7 @@ let alwaysFailChildWorkflow =
                  taskScheduleToCloseTimeout = 20)
 
 let failedWorkflowWithChildWorkflow = 
-    Workflow(domain = "theburningmonk.com", name = "failed_workflow_with_child_workflow", 
+    Workflow(domain = domain, name = "failed_workflow_with_child_workflow", 
              description = "this workflow will fail because of its child workflow", 
              version = "1",
              execStartToCloseTimeout = 60, 
@@ -219,7 +221,7 @@ let activities =
     |]
 
 let parallelActivities = 
-    Workflow(domain = "theburningmonk.com", name = "parallel_activities", 
+    Workflow(domain = domain, name = "parallel_activities", 
              description = "this workflow runs several activities in parallel", 
              version = "1")
     ++> (activities, reducer)
@@ -239,7 +241,7 @@ let schedulables =
     |]
 
 let parallelSchedulables = 
-    Workflow(domain = "theburningmonk.com", name = "parallel_schedulables", 
+    Workflow(domain = domain, name = "parallel_schedulables", 
              description = "this workflow runs several activities and workflows in parallel", 
              version = "1")
     ++> echoActivity
@@ -261,7 +263,7 @@ let failedSchedulables =
     |]
 
 let failedParallelSchedulables = 
-    Workflow(domain = "theburningmonk.com", name = "failed_parallel_schedulables", 
+    Workflow(domain = domain, name = "failed_parallel_schedulables", 
              description = "this workflow runs several activities and workflows in parallel and one of them fails", 
              version = "1")
     ++> echoActivity

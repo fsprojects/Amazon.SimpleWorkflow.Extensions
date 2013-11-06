@@ -134,6 +134,10 @@ module WorkflowUtils =
     let getActionId actionName { StageNumber = stageNum; AttemptNumber = attempts; ActionNumber = actionNum } = 
         sprintf "%s.stag_%d.act_%d.attempt_%d" actionName stageNum actionNum attempts
 
+    /// Formats the activity ID for an activity given its current state
+    let getChildWorkflowId actionName state = 
+        sprintf "%s.%O" (getActionId actionName state) (Guid.NewGuid())
+
     /// Formats the activity version for an activity at a particular stage of a workflow
     let getActivityVersion workflowName workflowVersion stageNum (activity : IActivity) = 
         match activity.Version with
@@ -201,7 +205,7 @@ module WorkflowUtils =
                                     TotalActions  = totalActions
                                }
             let control      = serializeSchedulableState state
-            let decision     = StartChildWorkflowExecution(getActionId schedulable.Name state, 
+            let decision     = StartChildWorkflowExecution(getChildWorkflowId schedulable.Name state, 
                                                            workflowType,
                                                            workflow.ChildPolicy,
                                                            Some workflow.TaskList, 
