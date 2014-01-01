@@ -49,3 +49,7 @@ You can view the full release notes [here](https://github.com/theburningmonk/Ama
 
 ###Keep in touch
 Please follow the official twitter account [@swf_extensions](https://twitter.com/swf_extensions) for updates, and feel free to send me any feedbacks or questions you have about the project :-)
+
+
+[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/theburningmonk/amazon.simpleworkflow.extensions/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
+
