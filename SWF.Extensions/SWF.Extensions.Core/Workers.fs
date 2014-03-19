@@ -9,6 +9,8 @@ open Amazon.SimpleWorkflow.Model
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Extensions.Model
 
+open log4net
+
 /// Encapsulates the work a decision worker performs (i.e. take a decision task and make some decisions).
 /// This class handles the boilerplate of: 
 ///     polling for tasks
@@ -25,6 +27,7 @@ type DecisionWorker private (
                                 ?concurrency : int                                  // the number of concurrent workers
                              ) = 
     let concurrency = defaultArg concurrency 1
+    let logger      = LogManager.GetLogger(sprintf "DecisionWorker (Domain %s, TaskList %s, Concurrency %d)" domain tasklist concurrency)
 
     let handler = async {
         while true do
@@ -50,8 +53,14 @@ type DecisionWorker private (
                 onExn(exn)                
     }
 
-    do seq { 1..concurrency } |> Seq.iter (fun _ -> Async.Start handler)
-    
+    do seq { 1..concurrency } 
+       |> Seq.iter (fun _ ->
+            Async.StartWithContinuations (
+                handler,
+                (fun _      -> logger.Error("Async workflow has exited unexpectedly.")),
+                (fun exn    -> logger.Error("Async workflow has exited with exception.", exn)),
+                (fun canExn -> logger.Error("Async workflow has been cancelled.", canExn))))
+
     /// Starts a decision worker with C# lambdas with minimal set of inputs
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
@@ -100,7 +109,8 @@ type ActivityWorker private (
                                 ?concurrency    : int                          // the number of concurrent workers                                
                             ) =
     let heartbeatFreq = defaultArg heartbeatFreq (TimeSpan.FromMinutes 1.0)
-    let concurrency = defaultArg concurrency 1
+    let concurrency   = defaultArg concurrency 1
+    let logger        = LogManager.GetLogger(sprintf "ActivityWorker (Domain %s, TaskList %s, Concurrency %d)" domain tasklist concurrency)
 
     // function to poll for activity tasks to perform
     let pollTask () = async {
@@ -164,7 +174,13 @@ type ActivityWorker private (
                 onExn(exn)
     }
 
-    do seq { 1..concurrency } |> Seq.iter (fun _ -> Async.Start start)
+    do seq { 1..concurrency } 
+       |> Seq.iter (fun _ -> 
+            Async.StartWithContinuations (
+                start,
+                (fun _      -> logger.Error("Async workflow has exited unexpectedly.")),
+                (fun exn    -> logger.Error("Async workflow has exited with exception.", exn)),
+                (fun canExn -> logger.Error("Async workflow has been cancelled.", canExn))))
 
     /// Starts an activity worker with C# lambdas with minimal set of inputs
     static member Start(clt             : AmazonSimpleWorkflowClient,

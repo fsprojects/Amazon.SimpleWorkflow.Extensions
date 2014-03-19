@@ -20,4 +20,12 @@ module Utils =
     let inline (!) (str : string) = stringOp str
 
     let inline asOption x = match x with | null -> None | _ -> Some x
-    let inline (!?) x = asOption x    
+    let inline (!?) x = asOption x
+
+    type Async = 
+        /// Inspired by Tomas's answer here (http://stackoverflow.com/a/18275864/55074)
+        static member StartCatchCancellation(work, ?cancellationToken) =
+            Async.FromContinuations(fun (cont, exnCont, _) -> 
+                let cancellationCont e = exnCont e
+
+                Async.StartWithContinuations(work, cont, exnCont, cancellationCont, ?cancellationToken = cancellationToken))
