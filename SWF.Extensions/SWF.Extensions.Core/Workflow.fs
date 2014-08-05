@@ -298,11 +298,10 @@ type Workflow (domain, name, description, version, ?taskList,
     // registers the workflow and activity types
     let register (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
         let registerActivities stages = async {
-            let req  = ListActivityTypesRequest(Domain = domain)
-                            .WithRegistrationStatus(string Registered)
-            let! res = clt.ListActivityTypesAsync(req)
+            let req  = ListActivityTypesRequest(Domain = domain, RegistrationStatus = swfRegStatus Registered)
+            let! res = clt.ListActivityTypesAsync(req) |> Async.AwaitTask
 
-            let existing = res.ListActivityTypesResult.ActivityTypeInfos.TypeInfos
+            let existing = res.ActivityTypeInfos.TypeInfos
                            |> Seq.map (fun info -> info.ActivityType.Name, info.ActivityType.Version)
                            |> Set.ofSeq
 
@@ -318,45 +317,50 @@ type Workflow (domain, name, description, version, ?taskList,
                              |> Seq.distinctBy (fun (_, activity, version) -> activity.Name, version)
 
             for (id, activity, version) in activities do
-                let req = RegisterActivityTypeRequest(Domain = domain, Name = activity.Name)
-                            .WithDescription(activity.Description)
-                            .WithDefaultTaskList(activity.TaskList)
-                            .WithVersion(version)
-                            .WithDefaultTaskHeartbeatTimeout(str activity.TaskHeartbeatTimeout)
-                            .WithDefaultTaskScheduleToStartTimeout(str activity.TaskScheduleToStartTimeout)
-                            .WithDefaultTaskStartToCloseTimeout(str activity.TaskStartToCloseTimeout)
-                            .WithDefaultTaskScheduleToCloseTimeout(str activity.TaskScheduleToCloseTimeout)
+                let req = RegisterActivityTypeRequest(
+                            Domain          = domain, 
+                            Name            = activity.Name,
+                            Description     = activity.Description,
+                            DefaultTaskList = activity.TaskList,
+                            Version         = version,
+                            DefaultTaskHeartbeatTimeout         = str activity.TaskHeartbeatTimeout,
+                            DefaultTaskScheduleToStartTimeout   = str activity.TaskScheduleToStartTimeout,
+                            DefaultTaskStartToCloseTimeout      = str activity.TaskStartToCloseTimeout,
+                            DefaultTaskScheduleToCloseTimeout   = str activity.TaskScheduleToCloseTimeout)
 
-                do! clt.RegisterActivityTypeAsync(req) |> Async.Ignore
+                do! clt.RegisterActivityTypeAsync(req) |> Async.AwaitTask |> Async.Ignore
         }
 
         let registerWorkflow () = async {
-            let req = ListWorkflowTypesRequest(Domain = domain, Name = name).WithRegistrationStatus(string Registered)
-            let! res = clt.ListWorkflowTypesAsync(req)
+            let req = ListWorkflowTypesRequest(Domain = domain, Name = name, RegistrationStatus = swfRegStatus Registered)
+            let! res = clt.ListWorkflowTypesAsync(req) |> Async.AwaitTask
 
             // only register the workflow if it doesn't exist already
-            if res.ListWorkflowTypesResult.WorkflowTypeInfos.TypeInfos.Count = 0 then
-                let req = RegisterWorkflowTypeRequest(Domain = domain, Name = name)
-                            .WithDescription(description)
-                            .WithVersion(version)
-                            .WithDefaultTaskList(taskList)
-                taskStartToCloseTimeout ?-> (str >> req.WithDefaultTaskStartToCloseTimeout)
-                execStartToCloseTimeout ?-> (str >> req.WithDefaultExecutionStartToCloseTimeout)
-                childPolicy             ?-> (str >> req.WithDefaultChildPolicy)
+            if res.WorkflowTypeInfos.TypeInfos.Count = 0 then
+                let req = RegisterWorkflowTypeRequest(
+                            Domain          = domain, 
+                            Name            = name,
+                            Description     = description,
+                            Version         = version,
+                            DefaultTaskList = taskList)
+                <@ req.DefaultTaskStartToCloseTimeout @>      <-? (taskStartToCloseTimeout ?>> str)
+                <@ req.DefaultExecutionStartToCloseTimeout @> <-? (execStartToCloseTimeout ?>> str)
+                <@ req.DefaultChildPolicy @>                  <-? (childPolicy ?>> swfChildPolicy)
 
-                do! clt.RegisterWorkflowTypeAsync(req) |> Async.Ignore
+                do! clt.RegisterWorkflowTypeAsync(req) |> Async.AwaitTask |> Async.Ignore
         }
 
         let registerDomain () = async {
-            let req = ListDomainsRequest().WithRegistrationStatus(string Registered)
-            let! res = clt.ListDomainsAsync(req)
+            let req = ListDomainsRequest(RegistrationStatus = swfRegStatus Registered)
+            let! res = clt.ListDomainsAsync(req) |> Async.AwaitTask
 
             // only register the domain if it doesn't exist already
-            let exists = res.ListDomainsResult.DomainInfos.Name |> Seq.exists (fun info -> info.Name = domain)
+            let exists = res.DomainInfos.Infos |> Seq.exists (fun info -> info.Name = domain)
             if not <| exists then
-                let req = RegisterDomainRequest(Name = domain)
-                            .WithWorkflowExecutionRetentionPeriodInDays(string Constants.maxWorkflowExecRetentionPeriodInDays)
-                do! clt.RegisterDomainAsync(req) |> Async.Ignore
+                let req = RegisterDomainRequest(
+                            Name = domain,
+                            WorkflowExecutionRetentionPeriodInDays = string Constants.maxWorkflowExecRetentionPeriodInDays)
+                do! clt.RegisterDomainAsync(req) |> Async.AwaitTask |> Async.Ignore
         }
 
         // run the domain registration first, otherwise the activities and workflow registrations will fail!
@@ -392,7 +396,7 @@ type Workflow (domain, name, description, version, ?taskList,
         let getLastExecContext () =
             let req = DescribeWorkflowExecutionRequest(Domain = domain, Execution = task.WorkflowExecution)
             let res = swfClient.DescribeWorkflowExecution(req)
-            res.DescribeWorkflowExecutionResult.WorkflowExecutionDetail.LatestExecutionContext
+            res.WorkflowExecutionDetail.LatestExecutionContext
 
         // makes the next move based on the control data for the previous step and its result
         let nextStep (Some control) result =

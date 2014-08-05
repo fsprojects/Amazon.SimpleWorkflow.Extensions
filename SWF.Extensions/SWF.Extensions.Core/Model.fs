@@ -3,34 +3,36 @@
 open System
 open System.Collections.Generic
 
+open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Model
-
 open Amazon.SimpleWorkflow.Extensions
 
 // #region type alias
 
-type ActivityId         = string
-type Cause              = string
-type Control            = string
-type Description        = string
-type Details            = string
-type Domain             = string
-type EventId            = int64
-type ExecutionContext   = string
-type Identity           = string
-type Input              = string
-type MarkerName         = string
-type Name               = string
-type Reason             = string
-type Result             = string
-type RunId              = string
-type Seconds            = int
-type SignalName         = string
-type SwfDecision        = Amazon.SimpleWorkflow.Model.Decision
-type TagList            = string[]
-type TimerId            = string
-type Version            = string
-type WorkflowId         = string
+type ActivityId             = string
+type Cause                  = string
+type Control                = string
+type Description            = string
+type Details                = string
+type Domain                 = string
+type EventId                = int64
+type ExecutionContext       = string
+type Identity               = string
+type Input                  = string
+type MarkerName             = string
+type Name                   = string
+type Reason                 = string
+type Result                 = string
+type RunId                  = string
+type Seconds                = int
+type SignalName             = string
+type SwfChildPolicy         = Amazon.SimpleWorkflow.ChildPolicy
+type SwfDecision            = Amazon.SimpleWorkflow.Model.Decision
+type SwfRegistrationStatus  = Amazon.SimpleWorkflow.RegistrationStatus
+type TagList                = string[]
+type TimerId                = string
+type Version                = string
+type WorkflowId             = string
 
 // #endregion
 
@@ -86,12 +88,20 @@ type TimeoutType =
 
 // #region Convertor functions
 
-let inline eventIdOp x = (int64 >> function | 0L -> None | x' -> Some x') x
-
-let inline secondsOp x = (int >> function | 0 -> None | x' -> Some x') x
-let inline seconds x = int x
-let inline timeout x = TimeoutType.op_Explicit x
-let inline childPolicy x = ChildPolicy.op_Explicit x
+let inline eventIdOp x      = (int64 >> function | 0L -> None | x' -> Some x') x
+let inline secondsOp x      = (int >> function | 0 -> None | x' -> Some x') x
+let inline seconds x        = int x
+let inline timeout x        = TimeoutType.op_Explicit x
+let inline childPolicy x    = ChildPolicy.op_Explicit x
+let inline swfChildPolicy x = 
+    match x with
+    | Terminate     -> SwfChildPolicy.TERMINATE
+    | RequestCancel -> SwfChildPolicy.REQUEST_CANCEL
+    | Abandon       -> SwfChildPolicy.ABANDON
+let inline swfRegStatus x   =
+    match x with
+    | Registered -> SwfRegistrationStatus.REGISTERED
+    | Deprecated -> SwfRegistrationStatus.DEPRECATED
 
 let inline tagListOp (lst : List<string>) = 
     match lst with 
@@ -153,109 +163,102 @@ type Decision =
     /// see http://docs.aws.amazon.com/amazonswf/latest/apireference/API_Decision.html
     member this.DecisionType = 
         match this with
-        | CancelTimer _                             -> "CancelTimer"
-        | CancelWorkflowExecution _                 -> "CancelWorkflowExecution"
-        | CompleteWorkflowExecution _               -> "CompleteWorkflowExecution"
-        | ContinueAsNewWorkflowExecution _          -> "ContinueAsNewWorkflowExecution"
-        | FailWorkflowExecution _                   -> "FailWorkflowExecution"
-        | RecordMarker _                            -> "RecordMarker"
-        | RequestCancelActivityTask _               -> "RequestCancelActivityTask"
-        | RequestCancelExternalWorkflowExecution _  -> "RequestCancelExternalWorkflowExecution"
-        | ScheduleActivityTask _                    -> "ScheduleActivityTask"
-        | SignalExternalWorkflowExecution _         -> "SignalExternalWorkflowExecution"
-        | StartChildWorkflowExecution _             -> "StartChildWorkflowExecution"
-        | StartTimer _                              -> "StartTimer"
+        | CancelTimer _                             -> DecisionType.CancelTimer
+        | CancelWorkflowExecution _                 -> DecisionType.CancelWorkflowExecution
+        | CompleteWorkflowExecution _               -> DecisionType.CompleteWorkflowExecution
+        | ContinueAsNewWorkflowExecution _          -> DecisionType.ContinueAsNewWorkflowExecution
+        | FailWorkflowExecution _                   -> DecisionType.FailWorkflowExecution
+        | RecordMarker _                            -> DecisionType.RecordMarker
+        | RequestCancelActivityTask _               -> DecisionType.RequestCancelActivityTask
+        | RequestCancelExternalWorkflowExecution _  -> DecisionType.RequestCancelExternalWorkflowExecution
+        | ScheduleActivityTask _                    -> DecisionType.ScheduleActivityTask
+        | SignalExternalWorkflowExecution _         -> DecisionType.SignalExternalWorkflowExecution
+        | StartChildWorkflowExecution _             -> DecisionType.StartChildWorkflowExecution
+        | StartTimer _                              -> DecisionType.StartTimer
     
     /// Returns a corresponding instance of Decision as defined in the AWSSDK
     member this.ToSwfDecision () =
         let decision = new SwfDecision(DecisionType = this.DecisionType)
         match this with
         | CancelTimer timerId
-            -> let attrs = CancelTimerDecisionAttributes().WithTimerId(timerId)
-               decision.WithCancelTimerDecisionAttributes(attrs)
+            -> let attrs = CancelTimerDecisionAttributes(TimerId = timerId)
+               decision.CancelTimerDecisionAttributes <- attrs
         | CancelWorkflowExecution details
             -> let attrs = CancelWorkflowExecutionDecisionAttributes()
-               attrs.WithDetails <-? details
-               decision.WithCancelWorkflowExecutionDecisionAttributes(attrs)
+               <@ attrs.Details @>                                  <-? details
+               decision.CancelWorkflowExecutionDecisionAttributes   <-  attrs
         | CompleteWorkflowExecution result
             -> let attrs = CompleteWorkflowExecutionDecisionAttributes()
-               attrs.WithResult <-? result
-               decision.WithCompleteWorkflowExecutionDecisionAttributes(attrs)
+               <@ attrs.Result @>                                   <-? result
+               decision.CompleteWorkflowExecutionDecisionAttributes <-  attrs
         | ContinueAsNewWorkflowExecution(childPolicy, taskList, input, tagList, execTimeout, taskTimeout, version)
             -> let attrs = ContinueAsNewWorkflowExecutionDecisionAttributes()
+               <@ attrs.ChildPolicy @>                  <-? (childPolicy ?>> swfChildPolicy)
+               <@ attrs.TaskList @>                     <-? taskList
+               <@ attrs.Input @>                        <-? input
+               <@ attrs.ExecutionStartToCloseTimeout @> <-? (execTimeout ?>> str)
+               <@ attrs.TaskStartToCloseTimeout @>      <-? (taskTimeout ?>> str)
+               <@ attrs.WorkflowTypeVersion @>          <-? version
+               attrs.TagList.AddRange                   <| defaultArg tagList [||]
 
-               childPolicy ?-> (str >> attrs.WithChildPolicy)
-               taskList    ?-> attrs.WithTaskList
-               input       ?-> attrs.WithInput
-               tagList     ?-> (fun lst -> attrs.WithTagList(new List<string>(lst)))
-               execTimeout ?-> (str >> attrs.WithExecutionStartToCloseTimeout)
-               taskTimeout ?-> (str >> attrs.WithTaskStartToCloseTimeout)
-               version     ?-> attrs.WithWorkflowTypeVersion
-
-               decision.WithContinueAsNewWorkflowExecutionDecisionAttributes(attrs)
+               decision.ContinueAsNewWorkflowExecutionDecisionAttributes <- attrs
         | FailWorkflowExecution(details, reason)
             -> let attrs = FailWorkflowExecutionDecisionAttributes()
-               attrs.WithDetails <-? details
-               attrs.WithReason  <-? reason
-               decision.WithFailWorkflowExecutionDecisionAttributes(attrs)
+               <@ attrs.Details @>  <-? details
+               <@ attrs.Reason @>   <-? reason
+               decision.FailWorkflowExecutionDecisionAttributes <- attrs
         | RecordMarker(markerName, details)
-            -> let attrs = RecordMarkerDecisionAttributes().WithMarkerName(markerName)
-               attrs.WithDetails <-? details
-               decision.WithRecordMarkerDecisionAttributes(attrs)
+            -> let attrs = RecordMarkerDecisionAttributes(MarkerName = markerName)
+               <@ attrs.Details @>  <-? details
+               decision.RecordMarkerDecisionAttributes <- attrs
         | RequestCancelActivityTask activityId
             -> let attrs = RequestCancelActivityTaskDecisionAttributes(ActivityId = activityId)
-               decision.WithRequestCancelActivityTaskDecisionAttributes(attrs)
+               decision.RequestCancelActivityTaskDecisionAttributes <- attrs
         | RequestCancelExternalWorkflowExecution(workflowId, runId, control) 
-            -> let attrs = RequestCancelExternalWorkflowExecutionDecisionAttributes().WithWorkflowId(workflowId)
-               attrs.WithRunId   <-? runId
-               attrs.WithControl <-? control
-               decision.WithRequestCancelExternalWorkflowExecutionDecisionAttributes(attrs)
+            -> let attrs = RequestCancelExternalWorkflowExecutionDecisionAttributes(WorkflowId = workflowId)
+               <@ attrs.RunId @>    <-? runId
+               <@ attrs.Control @>  <-? control
+               decision.RequestCancelExternalWorkflowExecutionDecisionAttributes <- attrs
         | ScheduleActivityTask(activityId, activityType, taskList, input, heartbeatTimeout, schedToStartTimeout, timeout, schedToCloseTimeout, control)
-            -> let attrs = ScheduleActivityTaskDecisionAttributes()
-                            .WithActivityId(activityId)
-                            .WithActivityType(activityType)
-               
-               taskList             ?-> attrs.WithTaskList
-               input                ?-> attrs.WithInput
-               heartbeatTimeout     ?-> (str >> attrs.WithHeartbeatTimeout)
-               schedToStartTimeout  ?-> (str >> attrs.WithScheduleToStartTimeout)
-               timeout              ?-> (str >> attrs.WithStartToCloseTimeout)
-               schedToCloseTimeout  ?-> (str >> attrs.WithScheduleToCloseTimeout)
-               control              ?-> attrs.WithControl
+            -> let attrs = ScheduleActivityTaskDecisionAttributes(ActivityId   = activityId,
+                                                                  ActivityType = activityType)               
+               <@ attrs.TaskList @>                 <-? taskList
+               <@ attrs.Input @>                    <-? input
+               <@ attrs.HeartbeatTimeout @>         <-? (heartbeatTimeout ?>> str)
+               <@ attrs.ScheduleToStartTimeout @>   <-? (schedToStartTimeout ?>> str)
+               <@ attrs.StartToCloseTimeout @>      <-? (timeout ?>> str)
+               <@ attrs.ScheduleToCloseTimeout @>   <-? (schedToCloseTimeout  ?>> str)
+               <@ attrs.Control @>                  <-? control
 
-               decision.WithScheduleActivityTaskDecisionAttributes(attrs)
+               decision.ScheduleActivityTaskDecisionAttributes <- attrs
         | SignalExternalWorkflowExecution(workflowId, signalName, input, runId, control)
-            -> let attrs = SignalExternalWorkflowExecutionDecisionAttributes()
-                            .WithWorkflowId(workflowId)
-                            .WithSignalName(signalName)
+            -> let attrs = SignalExternalWorkflowExecutionDecisionAttributes(WorkflowId = workflowId,
+                                                                             SignalName = signalName)
+               <@ attrs.Input @>    <-? input
+               <@ attrs.RunId @>    <-? runId
+               <@ attrs.Control @>  <-? control
 
-               attrs.WithInput   <-? input
-               attrs.WithRunId   <-? runId
-               attrs.WithControl <-? control
-
-               decision.WithSignalExternalWorkflowExecutionDecisionAttributes(attrs)
+               decision.SignalExternalWorkflowExecutionDecisionAttributes <- attrs
         | StartChildWorkflowExecution(workflowId, workflowType, childPolicy, taskList, input, tagList, execTimeout, taskTimeout, control)
-            -> let attrs = StartChildWorkflowExecutionDecisionAttributes()
-                            .WithWorkflowId(workflowId)
-                            .WithWorkflowType(workflowType)
-               
-               childPolicy ?-> (str >> attrs.WithChildPolicy)
-               taskList    ?-> attrs.WithTaskList
-               input       ?-> attrs.WithInput
-               tagList     ?-> (fun lst -> attrs.WithTagList(new List<string>(lst)))
-               execTimeout ?-> (str >> attrs.WithExecutionStartToCloseTimeout)
-               taskTimeout ?-> (str >> attrs.WithTaskStartToCloseTimeout)
-               control     ?-> attrs.WithControl
+            -> let attrs = StartChildWorkflowExecutionDecisionAttributes(WorkflowId   = workflowId,
+                                                                         WorkflowType = workflowType)
+               <@ attrs.ChildPolicy @>                  <-? (childPolicy ?>> swfChildPolicy)
+               <@ attrs.TaskList @>                     <-? taskList
+               <@ attrs.Input @>                        <-? input               
+               <@ attrs.ExecutionStartToCloseTimeout @> <-? (execTimeout ?>> str)
+               <@ attrs.TaskStartToCloseTimeout @>      <-? (taskTimeout ?>> str)
+               <@ attrs.Control @>                      <-? control
+               attrs.TagList.AddRange                   <| defaultArg tagList [||]
 
-               decision.WithStartChildWorkflowExecutionDecisionAttributes(attrs)
+               decision.StartChildWorkflowExecutionDecisionAttributes <- attrs
         | StartTimer(timerId, startToFireTimeout, control)
-            -> let attrs = StartTimerDecisionAttributes()
-                            .WithTimerId(timerId)
-                            .WithStartToFireTimeout(str startToFireTimeout)
-               
-               control ?-> attrs.WithControl
+            -> let attrs = StartTimerDecisionAttributes(TimerId            = timerId,
+                                                        StartToFireTimeout = str startToFireTimeout)
+               <@ attrs.Control @> <-? control
 
-               decision.WithStartTimerDecisionAttributes(attrs)
+               decision.StartTimerDecisionAttributes <- attrs
+
+        decision
 
 /// The different types of event types that can be returned along with a decision task
 /// see http://docs.aws.amazon.com/amazonswf/latest/apireference/API_HistoryEvent.html
@@ -535,7 +538,7 @@ type EventType =
     | WorkflowExecutionTimedOut         of ChildPolicy * TimeoutType
     
     static member op_Explicit (evt : Amazon.SimpleWorkflow.Model.HistoryEvent) = 
-        match evt.EventType with
+        match evt.EventType.Value with
         | "ActivityTaskCanceled"
             -> let attr = evt.ActivityTaskCanceledEventAttributes
                ActivityTaskCanceled(attr.ScheduledEventId, attr.StartedEventId, !attr.Details, Some attr.LatestCancelRequestedEventId)
@@ -562,20 +565,21 @@ type EventType =
                ActivityTaskStarted(attr.ScheduledEventId, attr.Identity |> stringOp)
         | "ActivityTaskTimedOut"
             -> let attr = evt.ActivityTaskTimedOutEventAttributes
-               ActivityTaskTimedOut(attr.ScheduledEventId, attr.StartedEventId, 
-                                    attr.TimeoutType    |> timeout, 
-                                    attr.Details        |> stringOp)
+               ActivityTaskTimedOut(attr.ScheduledEventId, 
+                                    attr.StartedEventId, 
+                                    attr.TimeoutType.Value |> timeout, 
+                                    !attr.Details)
         | "CancelTimerFailed"
             -> let attr = evt.CancelTimerFailedEventAttributes
-               CancelTimerFailed(attr.DecisionTaskCompletedEventId, attr.TimerId, attr.Cause)
+               CancelTimerFailed(attr.DecisionTaskCompletedEventId, attr.TimerId, attr.Cause.Value)
         | "CancelWorkflowExecutionFailed"
             -> let attr = evt.CancelWorkflowExecutionFailedEventAttributes
-               CancelWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.Cause)
+               CancelWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.Cause.Value)
         | "ChildWorkflowExecutionCanceled"
             -> let attr = evt.ChildWorkflowExecutionCanceledEventAttributes
                ChildWorkflowExecutionCanceled(attr.InitiatedEventId,  attr.StartedEventId,
                                               attr.WorkflowExecution, attr.WorkflowType,
-                                              attr.Details  |> stringOp)
+                                              !attr.Details)
         | "ChildWorkflowExecutionCompleted"
             -> let attr = evt.ChildWorkflowExecutionCompletedEventAttributes
                ChildWorkflowExecutionCompleted(attr.InitiatedEventId,  attr.StartedEventId,
@@ -598,16 +602,17 @@ type EventType =
             -> let attr = evt.ChildWorkflowExecutionTimedOutEventAttributes
                ChildWorkflowExecutionTimedOut(attr.InitiatedEventId,  attr.StartedEventId,
                                               attr.WorkflowExecution, attr.WorkflowType,
-                                              attr.TimeoutType  |> timeout)
+                                              attr.TimeoutType.Value |> timeout)
         | "CompleteWorkflowExecutionFailed"
             -> let attr = evt.CompleteWorkflowExecutionFailedEventAttributes
-               CompleteWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.Cause)
+               CompleteWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.Cause.Value)
         | "ContinueAsNewWorkflowExecutionFailed"
             -> let attr = evt.ContinueAsNewWorkflowExecutionFailedEventAttributes
-               ContinueAsNewWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.Cause)
+               ContinueAsNewWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.Cause.Value)
         | "DecisionTaskCompleted"
             -> let attr = evt.DecisionTaskCompletedEventAttributes
-               DecisionTaskCompleted(attr.ScheduledEventId, attr.StartedEventId, 
+               DecisionTaskCompleted(attr.ScheduledEventId, 
+                                     attr.StartedEventId, 
                                      !attr.ExecutionContext)
         | "DecisionTaskScheduled" 
             -> let attr = evt.DecisionTaskScheduledEventAttributes
@@ -617,8 +622,9 @@ type EventType =
                DecisionTaskStarted(attr.ScheduledEventId, !attr.Identity)
         | "DecisionTaskTimedOut"
             -> let attr = evt.DecisionTaskTimedOutEventAttributes
-               DecisionTaskTimedOut(attr.ScheduledEventId, attr.StartedEventId, 
-                                    attr.TimeoutType |> timeout)
+               DecisionTaskTimedOut(attr.ScheduledEventId, 
+                                    attr.StartedEventId, 
+                                    attr.TimeoutType.Value |> timeout)
         | "ExternalWorkflowExecutionCancelRequested"
             -> let attr = evt.ExternalWorkflowExecutionCancelRequestedEventAttributes
                ExternalWorkflowExecutionCancelRequested(attr.InitiatedEventId, attr.WorkflowExecution)
@@ -627,17 +633,17 @@ type EventType =
                ExternalWorkflowExecutionSignaled(attr.InitiatedEventId, attr.WorkflowExecution)
         | "FailWorkflowExecutionFailed"
             -> let attr = evt.FailWorkflowExecutionFailedEventAttributes
-               FailWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.Cause)
+               FailWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.Cause.Value)
         | "MarkerRecorded"
             -> let attr = evt.MarkerRecordedEventAttributes
                MarkerRecorded(attr.DecisionTaskCompletedEventId, !attr.MarkerName, !attr.Details)
         | "RequestCancelActivityTaskFailed"
             -> let attr = evt.RequestCancelActivityTaskFailedEventAttributes
-               RequestCancelActivityTaskFailed(attr.ActivityId, attr.DecisionTaskCompletedEventId, attr.Cause)
+               RequestCancelActivityTaskFailed(attr.ActivityId, attr.DecisionTaskCompletedEventId, attr.Cause.Value)
         | "RequestCancelExternalWorkflowExecutionFailed"
             -> let attr = evt.RequestCancelExternalWorkflowExecutionFailedEventAttributes
                RequestCancelExternalWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.InitiatedEventId,
-                                                            attr.WorkflowId, attr.Cause, 
+                                                            attr.WorkflowId, attr.Cause.Value, 
                                                             !attr.RunId, !attr.Control)
         | "RequestCancelExternalWorkflowExecutionInitiated"
             -> let attr = evt.RequestCancelExternalWorkflowExecutionInitiatedEventAttributes
@@ -646,11 +652,11 @@ type EventType =
         | "ScheduleActivityTaskFailed"
             -> let attr = evt.ScheduleActivityTaskFailedEventAttributes
                ScheduleActivityTaskFailed(attr.ActivityId, attr.ActivityType, 
-                                          attr.DecisionTaskCompletedEventId, attr.Cause)
+                                          attr.DecisionTaskCompletedEventId, attr.Cause.Value)
         | "SignalExternalWorkflowExecutionFailed"
             -> let attr = evt.SignalExternalWorkflowExecutionFailedEventAttributes
                SignalExternalWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.InitiatedEventId,
-                                                     attr.WorkflowId, attr.Cause,
+                                                     attr.WorkflowId, attr.Cause.Value,
                                                      !attr.RunId)
         | "SignalExternalWorkflowExecutionInitiated"
             -> let attr = evt.SignalExternalWorkflowExecutionInitiatedEventAttributes
@@ -660,20 +666,20 @@ type EventType =
         | "StartChildWorkflowExecutionFailed"
             -> let attr = evt.StartChildWorkflowExecutionFailedEventAttributes
                StartChildWorkflowExecutionFailed(attr.DecisionTaskCompletedEventId, attr.InitiatedEventId,
-                                                 attr.WorkflowId, attr.WorkflowType, attr.Cause,
+                                                 attr.WorkflowId, attr.WorkflowType, attr.Cause.Value,
                                                  !attr.Control)
         | "StartChildWorkflowExecutionInitiated"
             -> let attr = evt.StartChildWorkflowExecutionInitiatedEventAttributes
                StartChildWorkflowExecutionInitiated(attr.DecisionTaskCompletedEventId, attr.TaskList,
                                                     attr.WorkflowId, attr.WorkflowType, 
-                                                    attr.ChildPolicy    |> childPolicy,
-                                                    attr.TagList        |> tagListOp, 
+                                                    attr.ChildPolicy.Value              |> childPolicy,
+                                                    attr.TagList                        |> tagListOp, 
                                                     !attr.Input, !attr.Control,
                                                     attr.TaskStartToCloseTimeout        |> secondsOp,
                                                     attr.ExecutionStartToCloseTimeout   |> secondsOp)
         | "StartTimerFailed"
             -> let attr = evt.StartTimerFailedEventAttributes
-               StartTimerFailed(attr.DecisionTaskCompletedEventId, attr.TimerId, attr.Cause)
+               StartTimerFailed(attr.DecisionTaskCompletedEventId, attr.TimerId, attr.Cause.Value)
         | "TimerCanceled"
             -> let attr = evt.TimerCanceledEventAttributes
                TimerCanceled(attr.DecisionTaskCompletedEventId, attr.StartedEventId, attr.TimerId)
@@ -692,7 +698,7 @@ type EventType =
             -> let attr = evt.WorkflowExecutionCancelRequestedEventAttributes
                WorkflowExecutionCancelRequested(attr.ExternalInitiatedEventId |> eventIdOp,
                                                 !?attr.ExternalWorkflowExecution,
-                                                !attr.Cause)
+                                                !attr.Cause.Value)
         | "WorkflowExecutionCompleted"
             -> let attr = evt.WorkflowExecutionCompletedEventAttributes
                WorkflowExecutionCompleted(attr.DecisionTaskCompletedEventId, !attr.Result)
@@ -700,8 +706,8 @@ type EventType =
             -> let attr = evt.WorkflowExecutionContinuedAsNewEventAttributes
                WorkflowExecutionContinuedAsNew(attr.DecisionTaskCompletedEventId, attr.TaskList,
                                                attr.WorkflowType, attr.NewExecutionRunId, 
-                                               attr.ChildPolicy |> childPolicy,
-                                               attr.TagList     |> tagListOp,
+                                               attr.ChildPolicy.Value            |> childPolicy,
+                                               attr.TagList                      |> tagListOp,
                                                !attr.Input, 
                                                attr.TaskStartToCloseTimeout      |> secondsOp, 
                                                attr.ExecutionStartToCloseTimeout |> secondsOp)
@@ -715,7 +721,8 @@ type EventType =
                                          !attr.Input)
         | "WorkflowExecutionStarted"
             -> let attr = evt.WorkflowExecutionStartedEventAttributes
-               WorkflowExecutionStarted(attr.TaskList, attr.WorkflowType, attr.ChildPolicy |> childPolicy,
+               WorkflowExecutionStarted(attr.TaskList, attr.WorkflowType, 
+                                        attr.ChildPolicy.Value            |> childPolicy,
                                         !attr.ContinuedExecutionRunId,
                                         attr.ParentInitiatedEventId       |> eventIdOp,
                                         !?attr.ParentWorkflowExecution,
@@ -725,12 +732,12 @@ type EventType =
                                         attr.ExecutionStartToCloseTimeout |> secondsOp)
         | "WorkflowExecutionTerminated"
             -> let attr = evt.WorkflowExecutionTerminatedEventAttributes
-               WorkflowExecutionTerminated(attr.ChildPolicy |> childPolicy,
-                                           !attr.Details, !attr.Reason, !attr.Cause)
+               WorkflowExecutionTerminated(attr.ChildPolicy.Value |> childPolicy,
+                                           !attr.Details, !attr.Reason, !attr.Cause.Value)
         | "WorkflowExecutionTimedOut"
             -> let attr = evt.WorkflowExecutionTimedOutEventAttributes
-               WorkflowExecutionTimedOut(attr.ChildPolicy |> childPolicy, attr.TimeoutType |> timeout)
-        | str                                    -> raise <| UnknownEventType(str)
+               WorkflowExecutionTimedOut(attr.ChildPolicy.Value |> childPolicy, attr.TimeoutType.Value |> timeout)
+        | str -> raise <| UnknownEventType(str)
 
 type HistoryEvent =
     {
@@ -758,13 +765,13 @@ type DecisionTask (task   : Amazon.SimpleWorkflow.Model.DecisionTask,
         then [||] :> Amazon.SimpleWorkflow.Model.HistoryEvent seq
         else
             // poll for decision task again with the next page token to get more events
-            let req = PollForDecisionTaskRequest(Domain = domain, ReverseOrder = true)
-                        .WithNextPageToken(nextPageToken.Value)
-                        .WithTaskList(TaskList(Name = tasklist))
-
+            let req = PollForDecisionTaskRequest(Domain         = domain, 
+                                                 ReverseOrder   = true,
+                                                 NextPageToken  = nextPageToken.Value,
+                                                 TaskList       = new TaskList(Name = tasklist))
             let res = client.PollForDecisionTask(req)
-            nextPageToken := res.PollForDecisionTaskResult.DecisionTask.NextPageToken
-            res.PollForDecisionTaskResult.DecisionTask.Events :> Amazon.SimpleWorkflow.Model.HistoryEvent seq
+            nextPageToken := res.DecisionTask.NextPageToken
+            res.DecisionTask.Events :> Amazon.SimpleWorkflow.Model.HistoryEvent seq
 
     // the sequence of raw history events (from the AWSSDK)
     let rawEvents = seq {
