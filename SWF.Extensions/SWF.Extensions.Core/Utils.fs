@@ -19,8 +19,7 @@ module Utils =
     let inline (?->) (x : 'a option) (expr : Expr<'a>) = 
         match x, expr with 
         | None, _ -> ()
-        | Some x, PropertyGet(Some(PropertyGet(_, instProp, _)), prop, _) when prop.CanWrite ->
-            let inst = instProp.GetGetMethod().Invoke(null, [||])
+        | Some x, PropertyGet(Some(Value(inst, _)), prop, _) when prop.CanWrite ->
             prop.GetSetMethod().Invoke(inst, [| x |]) |> ignore
         | _ -> failwith "Expression is not a settable property : %A" expr
 
