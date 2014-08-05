@@ -29,28 +29,45 @@ type DecisionWorker private (
     let concurrency = defaultArg concurrency 1
     let logger      = LogManager.GetLogger(sprintf "DecisionWorker (Domain %s, TaskList %s, Concurrency %d)" domain tasklist concurrency)
 
+    let pollForTask () = async {
+        let req = PollForDecisionTaskRequest(Domain       = domain, 
+                                             ReverseOrder = true,
+                                             TaskList     = new TaskList(Name = tasklist))
+        <@ req.Identity @> <-? identity
+
+        let work = clt.PollForDecisionTaskAsync(req) |> Async.AwaitTask
+        let! res = Async.WithRetry(work, 3)
+        match res with
+        | Choice1Of2 pollRes -> return Some pollRes
+        | Choice2Of2 exn     -> onExn exn
+                                return None
+    }
+
+    let respond token (decisions : Decision[]) execContext = async {
+        let req = RespondDecisionTaskCompletedRequest(TaskToken        = token,
+                                                      ExecutionContext = execContext)
+        decisions 
+        |> Seq.map (fun x -> x.ToSwfDecision())
+        |> req.Decisions.AddRange
+
+        let work = clt.RespondDecisionTaskCompletedAsync(req) |> Async.AwaitTask 
+        let! res = Async.WithRetry(work, 3)
+        match res with
+        | Choice1Of2 _   -> return ()
+        | Choice2Of2 exn -> onExn exn
+                            return ()
+    }
+
     let handler = async {
         while true do
             try
-                let pollReq = PollForDecisionTaskRequest(Domain       = domain, 
-                                                         ReverseOrder = true,
-                                                         TaskList     = new TaskList(Name = tasklist))
-                <@ pollReq.Identity @> <-? identity
-
-                let! pollRes = clt.PollForDecisionTaskAsync(pollReq) |> Async.AwaitTask
-                match pollRes.DecisionTask.TaskToken with
-                | null -> ()
-                | _ ->
+                let! pollRes = pollForTask()
+                match pollRes with
+                | Some pollRes when not <| nullOrWs pollRes.DecisionTask.TaskToken ->                    
                     let task = DecisionTask(pollRes.DecisionTask, clt, domain, tasklist)
                     let decisions, execContext = decide(clt, task) 
-
-                    let req = RespondDecisionTaskCompletedRequest(TaskToken = task.TaskToken,
-                                                                  ExecutionContext = execContext)
-                    decisions 
-                    |> Seq.map (fun x -> x.ToSwfDecision())
-                    |> req.Decisions.AddRange
-
-                    do! clt.RespondDecisionTaskCompletedAsync(req) |> Async.AwaitTask |> Async.Ignore
+                    do! respond task.TaskToken decisions execContext
+                | _ -> ()
             with exn -> 
                 // invoke the supplied exception handler
                 onExn(exn)
@@ -120,15 +137,20 @@ type ActivityWorker private (
         let req = PollForActivityTaskRequest(Domain = domain, TaskList = TaskList(Name = tasklist))
         <@ req.Identity @> <-? identity
 
-        let! res = clt.PollForActivityTaskAsync(req) |> Async.AwaitTask
-        return res.ActivityTask
+        let work = clt.PollForActivityTaskAsync(req) |> Async.AwaitTask
+        let! res = Async.WithRetry(work, 3)
+        match res with
+        | Choice1Of2 pollRes -> return Some pollRes.ActivityTask
+        | Choice2Of2 exn     -> onExn exn
+                                return None
     }
 
     // function to record heartbeats periodically
     let recordHeartbeat (task : ActivityTask) = async {
         while true do
             let req = RecordActivityTaskHeartbeatRequest(TaskToken = task.TaskToken)
-            do! clt.RecordActivityTaskHeartbeatAsync(req) |> Async.AwaitTask |> Async.Ignore
+            let work = clt.RecordActivityTaskHeartbeatAsync(req) |> Async.AwaitTask
+            do! Async.WithRetry(work, 1) |> Async.Ignore
             do! Async.Sleep(int heartbeatFreq.TotalMilliseconds)
     }
 
@@ -136,19 +158,34 @@ type ActivityWorker private (
     let getTaskHandler (task : ActivityTask) = 
         let cts = new CancellationTokenSource()
 
+        let respondCompletion result = async {
+            let req = RespondActivityTaskCompletedRequest(TaskToken = task.TaskToken,
+                                                          Result    = result)
+            let work = clt.RespondActivityTaskCompletedAsync(req) |> Async.AwaitTask
+            let! res = Async.WithRetry(work, 3)
+            match res with
+            | Choice2Of2 exn -> onExn(exn)
+            | _              -> ()
+        }
+
+        let respondFailure (exn : Exception) = async {
+            // include the exception's message and stacktrace in the response
+            let req = RespondActivityTaskFailedRequest(TaskToken = task.TaskToken,
+                                                        Reason    = exn.Message,
+                                                        Details   = exn.ToString())
+            let work = clt.RespondActivityTaskFailedAsync(req) |> Async.AwaitTask
+            let! res = Async.WithRetry(work, 3)
+            match res with
+            | Choice2Of2 exn -> onExn(exn)
+            | _              -> ()
+        }
+
         let handler = async {
-            try 
-                let result = work(task.Input)
-                let req = RespondActivityTaskCompletedRequest(TaskToken = task.TaskToken,
-                                                              Result    = result)
-                do! clt.RespondActivityTaskCompletedAsync(req) |> Async.AwaitTask |> Async.Ignore
+            try
+                do! work(task.Input) |> respondCompletion
                 cts.Cancel()
             with exn ->
-                // include the exception's message and stacktrace in the response
-                let req = RespondActivityTaskFailedRequest(TaskToken = task.TaskToken,
-                                                           Reason    = exn.Message,
-                                                           Details   = exn.ToString())
-                do! clt.RespondActivityTaskFailedAsync(req) |> Async.AwaitTask |> Async.Ignore
+                do! respondFailure exn                
                 cts.Cancel()
         }
 
@@ -157,17 +194,18 @@ type ActivityWorker private (
     let start = async {
         while true do
             try
-                let! task = pollTask()
+                let! pollRes = pollTask()
 
-                match task.TaskToken with
-                | null -> () // make sure task token was received correctly, otherwise, skip the task
-                | _ ->
+                match pollRes with
+                | Some task when not <| nullOrWs task.TaskToken ->
                     let handler, cts = getTaskHandler(task)
 
                     // start the heart beat in a separate async computation, but use the same 
                     // cancellation token as the task handler
-                    Async.Start(recordHeartbeat(task), cts.Token)
+                    let heartbeat = Async.StartCatchCancellation(recordHeartbeat(task), cts.Token)
+                    Async.Start(heartbeat)
                     Async.StartImmediate(handler)
+                | _ -> ()
             with exn ->
                 // invokes the specified exception handler to handle non-hanlder errors
                 onExn(exn)
