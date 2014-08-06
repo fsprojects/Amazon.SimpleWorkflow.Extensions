@@ -1,18 +1,12 @@
-﻿namespace Amazon.SimpleWorkflow.Extensions
-
+﻿namespace System
 open System.Reflection
-open System.Runtime.CompilerServices
-open System.Runtime.InteropServices
 
-[<assembly: ComVisible(false)>]
-
-[<assembly: AssemblyTitle("SWF.Extensions.Core")>]
-[<assembly: AssemblyDescription("Provides an intuitive API for modelling workflows against SWF")>]
-[<assembly: AssemblyConfiguration("theburningmonk.com")>]
-
-[<assembly: AssemblyProduct("Amazon.SimpleWorkflow.Extensions")>]
-[<assembly: AssemblyCopyright("Copyright © Yan Cui 2013")>]
-[<assembly: AssemblyVersion("1.2.0")>]
-[<assembly: AssemblyFileVersion("1.2.0")>]
-
+[<assembly: AssemblyTitleAttribute("Amazon.SimpleWorkflow.Extensions")>]
+[<assembly: AssemblyProductAttribute("Amazon.SimpleWorkflow.Extensions")>]
+[<assembly: AssemblyDescriptionAttribute("Provides an intuitive API for modelling workflows against SWF")>]
+[<assembly: AssemblyVersionAttribute("1.2.0")>]
+[<assembly: AssemblyFileVersionAttribute("1.2.0")>]
 do ()
+
+module internal AssemblyVersionInformation =
+    let [<Literal>] Version = "1.2.0"
