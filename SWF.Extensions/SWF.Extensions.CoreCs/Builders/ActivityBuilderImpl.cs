@@ -26,6 +26,8 @@ namespace Amazon.SimpleWorkflow.Extensions.Builders
 
         public string Description { get; private set; }
 
+        public string Version { get; private set; }
+
         public string TaskList { get; private set; }
 
         public Func<TInput, TOutput> Processor { get; private set; }
@@ -39,6 +41,12 @@ namespace Amazon.SimpleWorkflow.Extensions.Builders
         public int TaskScheduleToCloseTimeout { get; private set; }
 
         public int? MaxAttempts { get; private set; }
+
+        public IActivityBuilder<TInput, TOutput> WithVersion(string version)
+        {
+            Version = version;
+            return this;
+        }
 
         public IActivityBuilder<TInput, TOutput> WithDescription(string description)
         {
@@ -70,6 +78,7 @@ namespace Amazon.SimpleWorkflow.Extensions.Builders
                             TaskScheduleToStartTimeout,
                             TaskStartToCloseTimeout,
                             TaskScheduleToCloseTimeout,
+                            Version.AsOption(string.IsNullOrWhiteSpace),
                             TaskList.AsOption(string.IsNullOrWhiteSpace),
                             MaxAttempts.AsOption());
         }

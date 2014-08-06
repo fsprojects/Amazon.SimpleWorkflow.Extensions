@@ -22,6 +22,7 @@ type ISchedulable =
 type IActivity =
     inherit ISchedulable
 
+    abstract member Version                     : string option
     abstract member TaskList                    : TaskList    
     abstract member TaskHeartbeatTimeout        : Seconds
     abstract member TaskScheduleToStartTimeout  : Seconds
@@ -133,8 +134,15 @@ module WorkflowUtils =
     let getActionId actionName { StageNumber = stageNum; AttemptNumber = attempts; ActionNumber = actionNum } = 
         sprintf "%s.stag_%d.act_%d.attempt_%d" actionName stageNum actionNum attempts
 
+    /// Formats the activity ID for an activity given its current state
+    let getChildWorkflowId actionName state = 
+        sprintf "%s.%O" (getActionId actionName state) (Guid.NewGuid())
+
     /// Formats the activity version for an activity at a particular stage of a workflow
-    let getActivityVersion workflowName workflowVersion stageNum = sprintf "%s.v%s.%d" workflowName workflowVersion stageNum
+    let getActivityVersion workflowName workflowVersion stageNum (activity : IActivity) = 
+        match activity.Version with
+        | Some v -> sprintf "%s.v%s.%d.v%s" workflowName workflowVersion stageNum v
+        | _      -> sprintf "%s.v%s.%d" workflowName workflowVersion stageNum
     
     /// Returns the event type associated with the specified event ID
     let findEventTypeById eventId (evts : HistoryEvent seq) =
@@ -162,7 +170,7 @@ module WorkflowUtils =
 
     /// Returns the decision to schedule an activity
     let scheduleActivity actionNum totalActions workflowName workflowVersion stageNum (activity : IActivity) input attempts = 
-        let activityType = ActivityType(Name = activity.Name, Version = getActivityVersion workflowName workflowVersion stageNum)
+        let activityType = ActivityType(Name = activity.Name, Version = getActivityVersion workflowName workflowVersion stageNum activity)
         let state        = { 
                                 StageNumber   = stageNum
                                 AttemptNumber = attempts + 1
@@ -197,7 +205,7 @@ module WorkflowUtils =
                                     TotalActions  = totalActions
                                }
             let control      = serializeSchedulableState state
-            let decision     = StartChildWorkflowExecution(getActionId schedulable.Name state, 
+            let decision     = StartChildWorkflowExecution(getChildWorkflowId schedulable.Name state, 
                                                            workflowType,
                                                            workflow.ChildPolicy,
                                                            Some workflow.TaskList, 
@@ -221,6 +229,7 @@ type Activity<'TInput, 'TOutput>(name, description,
                                  taskScheduleToStartTimeout  : Seconds,
                                  taskStartToCloseTimeout     : Seconds,
                                  taskScheduleToCloseTimeout  : Seconds,
+                                 ?version,
                                  ?taskList,
                                  ?maxAttempts) =
     let taskList    = defaultArg taskList (name + "TaskList")
@@ -234,6 +243,7 @@ type Activity<'TInput, 'TOutput>(name, description,
     
     interface IActivity with
         member this.Name                        = name
+        member this.Version                     = version
         member this.Description                 = description
         member this.TaskList                    = TaskList(Name = taskList)
         member this.TaskHeartbeatTimeout        = taskHeartbeatTimeout
@@ -282,70 +292,75 @@ type Workflow (domain, name, description, version, ?taskList,
             | { Action = ParallelActions(arr, _) }      -> arr |> getWorkflows |> Array.toList
             | _ -> [])
     
-    /// tries to get the nth (zero-index) stage
+    // tries to get the nth (zero-index) stage
     let getStage n = if n >= stages.Length then None else List.nth stages n |> Some
 
     // registers the workflow and activity types
     let register (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
         let registerActivities stages = async {
-            let req = ListActivityTypesRequest(Domain = domain).WithRegistrationStatus(string Registered)
-            let! res = clt.ListActivityTypesAsync(req)
+            let req  = ListActivityTypesRequest(Domain = domain, RegistrationStatus = swfRegStatus Registered)
+            let! res = clt.ListActivityTypesAsync(req) |> Async.AwaitTask
 
-            let existing = res.ListActivityTypesResult.ActivityTypeInfos.TypeInfos
+            let existing = res.ActivityTypeInfos.TypeInfos
                            |> Seq.map (fun info -> info.ActivityType.Name, info.ActivityType.Version)
                            |> Set.ofSeq
 
             let activities = stages 
                              |> List.collect (function 
                                 | { StageNumber = stageNum; Action = ScheduleActivity(activity) }
-                                    -> [ (stageNum, activity, getActivityVersion name version stageNum) ]
+                                    -> [ (stageNum, activity, getActivityVersion name version stageNum activity) ]
                                 | { StageNumber = stageNum; Action = ParallelActions(arr, _) }
-                                    -> let activityVersion = getActivityVersion name version stageNum
-                                       arr |> getActivities |> Array.map (fun activity -> stageNum, activity, activityVersion) |> Array.toList
+                                    -> let getActivityVersion = getActivityVersion name version stageNum
+                                       arr |> getActivities |> Array.map (fun activity -> stageNum, activity, getActivityVersion activity) |> Array.toList
                                 | _ -> [])
                              |> List.filter (fun (_, activity, version) -> not <| existing.Contains(activity.Name, version))
                              |> Seq.distinctBy (fun (_, activity, version) -> activity.Name, version)
 
             for (id, activity, version) in activities do
-                let req = RegisterActivityTypeRequest(Domain = domain, Name = activity.Name)
-                            .WithDescription(activity.Description)
-                            .WithDefaultTaskList(activity.TaskList)
-                            .WithVersion(version)
-                            .WithDefaultTaskHeartbeatTimeout(str activity.TaskHeartbeatTimeout)
-                            .WithDefaultTaskScheduleToStartTimeout(str activity.TaskScheduleToStartTimeout)
-                            .WithDefaultTaskStartToCloseTimeout(str activity.TaskStartToCloseTimeout)
-                            .WithDefaultTaskScheduleToCloseTimeout(str activity.TaskScheduleToCloseTimeout)
+                let req = RegisterActivityTypeRequest(
+                            Domain          = domain, 
+                            Name            = activity.Name,
+                            Description     = activity.Description,
+                            DefaultTaskList = activity.TaskList,
+                            Version         = version,
+                            DefaultTaskHeartbeatTimeout         = str activity.TaskHeartbeatTimeout,
+                            DefaultTaskScheduleToStartTimeout   = str activity.TaskScheduleToStartTimeout,
+                            DefaultTaskStartToCloseTimeout      = str activity.TaskStartToCloseTimeout,
+                            DefaultTaskScheduleToCloseTimeout   = str activity.TaskScheduleToCloseTimeout)
 
-                do! clt.RegisterActivityTypeAsync(req) |> Async.Ignore
+                do! clt.RegisterActivityTypeAsync(req) |> Async.AwaitTask |> Async.Ignore
         }
 
         let registerWorkflow () = async {
-            let req = ListWorkflowTypesRequest(Domain = domain, Name = name).WithRegistrationStatus(string Registered)
-            let! res = clt.ListWorkflowTypesAsync(req)
+            let req = ListWorkflowTypesRequest(Domain = domain, Name = name, RegistrationStatus = swfRegStatus Registered)
+            let! res = clt.ListWorkflowTypesAsync(req) |> Async.AwaitTask
 
             // only register the workflow if it doesn't exist already
-            if res.ListWorkflowTypesResult.WorkflowTypeInfos.TypeInfos.Count = 0 then
-                let req = RegisterWorkflowTypeRequest(Domain = domain, Name = name)
-                            .WithDescription(description)
-                            .WithVersion(version)
-                            .WithDefaultTaskList(taskList)
-                taskStartToCloseTimeout ?-> (str >> req.WithDefaultTaskStartToCloseTimeout)
-                execStartToCloseTimeout ?-> (str >> req.WithDefaultExecutionStartToCloseTimeout)
-                childPolicy             ?-> (str >> req.WithDefaultChildPolicy)
+            if res.WorkflowTypeInfos.TypeInfos.Count = 0 then
+                let req = RegisterWorkflowTypeRequest(
+                            Domain          = domain, 
+                            Name            = name,
+                            Description     = description,
+                            Version         = version,
+                            DefaultTaskList = taskList)
+                <@ req.DefaultTaskStartToCloseTimeout @>      <-? (taskStartToCloseTimeout ?>> str)
+                <@ req.DefaultExecutionStartToCloseTimeout @> <-? (execStartToCloseTimeout ?>> str)
+                <@ req.DefaultChildPolicy @>                  <-? (childPolicy ?>> swfChildPolicy)
 
-                do! clt.RegisterWorkflowTypeAsync(req) |> Async.Ignore
+                do! clt.RegisterWorkflowTypeAsync(req) |> Async.AwaitTask |> Async.Ignore
         }
 
         let registerDomain () = async {
-            let req = ListDomainsRequest().WithRegistrationStatus(string Registered)
-            let! res = clt.ListDomainsAsync(req)
+            let req = ListDomainsRequest(RegistrationStatus = swfRegStatus Registered)
+            let! res = clt.ListDomainsAsync(req) |> Async.AwaitTask
 
             // only register the domain if it doesn't exist already
-            let exists = res.ListDomainsResult.DomainInfos.Name |> Seq.exists (fun info -> info.Name = domain)
+            let exists = res.DomainInfos.Infos |> Seq.exists (fun info -> info.Name = domain)
             if not <| exists then
-                let req = RegisterDomainRequest(Name = domain)
-                            .WithWorkflowExecutionRetentionPeriodInDays(string Constants.maxWorkflowExecRetentionPeriodInDays)
-                do! clt.RegisterDomainAsync(req) |> Async.Ignore
+                let req = RegisterDomainRequest(
+                            Name = domain,
+                            WorkflowExecutionRetentionPeriodInDays = string Constants.maxWorkflowExecRetentionPeriodInDays)
+                do! clt.RegisterDomainAsync(req) |> Async.AwaitTask |> Async.Ignore
         }
 
         // run the domain registration first, otherwise the activities and workflow registrations will fail!
@@ -381,7 +396,7 @@ type Workflow (domain, name, description, version, ?taskList,
         let getLastExecContext () =
             let req = DescribeWorkflowExecutionRequest(Domain = domain, Execution = task.WorkflowExecution)
             let res = swfClient.DescribeWorkflowExecution(req)
-            res.DescribeWorkflowExecutionResult.WorkflowExecutionDetail.LatestExecutionContext
+            res.WorkflowExecutionDetail.LatestExecutionContext
 
         // makes the next move based on the control data for the previous step and its result
         let nextStep (Some control) result =
@@ -495,12 +510,12 @@ type Workflow (domain, name, description, version, ?taskList,
         let id = stages.Length
         let stage = { StageNumber = id; Action = toStageAction args }
         Workflow(domain, name, description, version, taskList.Name, 
-                    stage :: stages,
-                    ?taskStartToCloseTimeout = taskStartToCloseTimeout,
-                    ?execStartToCloseTimeout = execStartToCloseTimeout,
-                    ?childPolicy             = childPolicy,
-                    ?identity                = identity,
-                    maxAttempts              = maxAttempts)
+                 stage :: stages,
+                 ?taskStartToCloseTimeout = taskStartToCloseTimeout,
+                 ?execStartToCloseTimeout = execStartToCloseTimeout,
+                 ?childPolicy             = childPolicy,
+                 ?identity                = identity,
+                 maxAttempts              = maxAttempts)
 
     // #region Public Events
 

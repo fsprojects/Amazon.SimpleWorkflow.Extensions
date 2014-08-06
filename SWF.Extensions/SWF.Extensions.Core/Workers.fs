@@ -9,6 +9,8 @@ open Amazon.SimpleWorkflow.Model
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Extensions.Model
 
+open log4net
+
 /// Encapsulates the work a decision worker performs (i.e. take a decision task and make some decisions).
 /// This class handles the boilerplate of: 
 ///     polling for tasks
@@ -25,33 +27,60 @@ type DecisionWorker private (
                                 ?concurrency : int                                  // the number of concurrent workers
                              ) = 
     let concurrency = defaultArg concurrency 1
+    let logger      = LogManager.GetLogger(sprintf "DecisionWorker (Domain %s, TaskList %s, Concurrency %d)" domain tasklist concurrency)
+
+    let pollForTask () = async {
+        let req = PollForDecisionTaskRequest(Domain       = domain, 
+                                             ReverseOrder = true,
+                                             TaskList     = new TaskList(Name = tasklist))
+        <@ req.Identity @> <-? identity
+
+        let work = clt.PollForDecisionTaskAsync(req) |> Async.AwaitTask
+        let! res = Async.WithRetry(work, 3)
+        match res with
+        | Choice1Of2 pollRes -> return Some pollRes
+        | Choice2Of2 exn     -> onExn exn
+                                return None
+    }
+
+    let respond token (decisions : Decision[]) execContext = async {
+        let req = RespondDecisionTaskCompletedRequest(TaskToken        = token,
+                                                      ExecutionContext = execContext)
+        decisions 
+        |> Seq.map (fun x -> x.ToSwfDecision())
+        |> req.Decisions.AddRange
+
+        let work = clt.RespondDecisionTaskCompletedAsync(req) |> Async.AwaitTask 
+        let! res = Async.WithRetry(work, 3)
+        match res with
+        | Choice1Of2 _   -> return ()
+        | Choice2Of2 exn -> onExn exn
+                            return ()
+    }
 
     let handler = async {
         while true do
             try
-                let pollReq = PollForDecisionTaskRequest(Domain = domain, ReverseOrder = true)
-                                    .WithTaskList(TaskList(Name = tasklist))
-                pollReq.WithIdentity    <-? identity
-
-                let! pollRes = clt.PollForDecisionTaskAsync(pollReq)
-                match pollRes.PollForDecisionTaskResult.DecisionTask.TaskToken with
-                | null -> ()
-                | _ ->
-                    let task = DecisionTask(pollRes.PollForDecisionTaskResult.DecisionTask, clt, domain, tasklist)
-
-                    let decisions, execContext = decide(clt, task) |> (fun (decisions, cxt) -> decisions |> Array.map (fun x -> x.ToSwfDecision()), cxt)
-                    let req = RespondDecisionTaskCompletedRequest()
-                                .WithTaskToken(task.TaskToken)
-                                .WithDecisions(decisions)
-                                .WithExecutionContext(execContext)
-                    do! clt.RespondDecisionTaskCompletedAsync(req) |> Async.Ignore
+                let! pollRes = pollForTask()
+                match pollRes with
+                | Some pollRes when not <| nullOrWs pollRes.DecisionTask.TaskToken ->                    
+                    let task = DecisionTask(pollRes.DecisionTask, clt, domain, tasklist)
+                    let decisions, execContext = decide(clt, task) 
+                    do! respond task.TaskToken decisions execContext
+                | _ -> ()
             with exn -> 
                 // invoke the supplied exception handler
-                onExn(exn)                
+                onExn(exn)
     }
 
-    do seq { 1..concurrency } |> Seq.iter (fun _ -> Async.Start handler)
-    
+    do seq { 1..concurrency } 
+       |> Seq.iter (fun _ ->
+            Async.StartWithContinuations (
+                handler,
+                (fun _      -> logger.Error("Async workflow has exited unexpectedly.")),
+                (fun exn    -> logger.Error("Async workflow has exited with exception.", exn)),
+                (fun canExn -> logger.Error("Async workflow has been cancelled.", canExn))))
+
     /// Starts a decision worker with C# lambdas with minimal set of inputs
     static member Start(clt             : AmazonSimpleWorkflowClient,
                         domain          : string,
@@ -100,24 +129,28 @@ type ActivityWorker private (
                                 ?concurrency    : int                          // the number of concurrent workers                                
                             ) =
     let heartbeatFreq = defaultArg heartbeatFreq (TimeSpan.FromMinutes 1.0)
-    let concurrency = defaultArg concurrency 1
+    let concurrency   = defaultArg concurrency 1
+    let logger        = LogManager.GetLogger(sprintf "ActivityWorker (Domain %s, TaskList %s, Concurrency %d)" domain tasklist concurrency)
 
     // function to poll for activity tasks to perform
     let pollTask () = async {
-        let req = PollForActivityTaskRequest(Domain = domain)
-                        .WithTaskList(TaskList(Name = tasklist))
-        req.WithIdentity    <-? identity
+        let req = PollForActivityTaskRequest(Domain = domain, TaskList = TaskList(Name = tasklist))
+        <@ req.Identity @> <-? identity
 
-        let! res = clt.PollForActivityTaskAsync(req)
-        return res.PollForActivityTaskResult.ActivityTask
+        let work = clt.PollForActivityTaskAsync(req) |> Async.AwaitTask
+        let! res = Async.WithRetry(work, 3)
+        match res with
+        | Choice1Of2 pollRes -> return Some pollRes.ActivityTask
+        | Choice2Of2 exn     -> onExn exn
+                                return None
     }
 
     // function to record heartbeats periodically
     let recordHeartbeat (task : ActivityTask) = async {
         while true do
-            let req = RecordActivityTaskHeartbeatRequest()
-                        .WithTaskToken(task.TaskToken)
-            do! clt.RecordActivityTaskHeartbeatAsync(req) |> Async.Ignore
+            let req = RecordActivityTaskHeartbeatRequest(TaskToken = task.TaskToken)
+            let work = clt.RecordActivityTaskHeartbeatAsync(req) |> Async.AwaitTask
+            do! Async.WithRetry(work, 1) |> Async.Ignore
             do! Async.Sleep(int heartbeatFreq.TotalMilliseconds)
     }
 
@@ -125,21 +158,34 @@ type ActivityWorker private (
     let getTaskHandler (task : ActivityTask) = 
         let cts = new CancellationTokenSource()
 
+        let respondCompletion result = async {
+            let req = RespondActivityTaskCompletedRequest(TaskToken = task.TaskToken,
+                                                          Result    = result)
+            let work = clt.RespondActivityTaskCompletedAsync(req) |> Async.AwaitTask
+            let! res = Async.WithRetry(work, 3)
+            match res with
+            | Choice2Of2 exn -> onExn(exn)
+            | _              -> ()
+        }
+
+        let respondFailure (exn : Exception) = async {
+            // include the exception's message and stacktrace in the response
+            let req = RespondActivityTaskFailedRequest(TaskToken = task.TaskToken,
+                                                        Reason    = exn.Message,
+                                                        Details   = exn.ToString())
+            let work = clt.RespondActivityTaskFailedAsync(req) |> Async.AwaitTask
+            let! res = Async.WithRetry(work, 3)
+            match res with
+            | Choice2Of2 exn -> onExn(exn)
+            | _              -> ()
+        }
+
         let handler = async {
-            try 
-                let result = work(task.Input)
-                let req = RespondActivityTaskCompletedRequest()
-                            .WithTaskToken(task.TaskToken)
-                            .WithResult(result)
-                do! clt.RespondActivityTaskCompletedAsync(req) |> Async.Ignore
+            try
+                do! work(task.Input) |> respondCompletion
                 cts.Cancel()
             with exn ->
-                // include the exception's message and stacktrace in the response
-                let req = RespondActivityTaskFailedRequest()
-                            .WithTaskToken(task.TaskToken)
-                            .WithReason(exn.Message)
-                            .WithDetails(exn.StackTrace)
-                do! clt.RespondActivityTaskFailedAsync(req) |> Async.Ignore
+                do! respondFailure exn                
                 cts.Cancel()
         }
 
@@ -148,23 +194,30 @@ type ActivityWorker private (
     let start = async {
         while true do
             try
-                let! task = pollTask()
+                let! pollRes = pollTask()
 
-                match task.TaskToken with
-                | null -> () // make sure task token was received correctly, otherwise, skip the task
-                | _ ->
+                match pollRes with
+                | Some task when not <| nullOrWs task.TaskToken ->
                     let handler, cts = getTaskHandler(task)
 
                     // start the heart beat in a separate async computation, but use the same 
                     // cancellation token as the task handler
-                    Async.Start(recordHeartbeat(task), cts.Token)
+                    let heartbeat = Async.StartCatchCancellation(recordHeartbeat(task), cts.Token)
+                    Async.Start(heartbeat)
                     Async.StartImmediate(handler)
+                | _ -> ()
             with exn ->
                 // invokes the specified exception handler to handle non-hanlder errors
                 onExn(exn)
     }
 
-    do seq { 1..concurrency } |> Seq.iter (fun _ -> Async.Start start)
+    do seq { 1..concurrency } 
+       |> Seq.iter (fun _ -> 
+            Async.StartWithContinuations (
+                start,
+                (fun _      -> logger.Error("Async workflow has exited unexpectedly.")),
+                (fun exn    -> logger.Error("Async workflow has exited with exception.", exn)),
+                (fun canExn -> logger.Error("Async workflow has been cancelled.", canExn))))
 
     /// Starts an activity worker with C# lambdas with minimal set of inputs
     static member Start(clt             : AmazonSimpleWorkflowClient,

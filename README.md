@@ -3,7 +3,7 @@ Amazon.SimpleWorkflow.Extensions
 
 Extensions to AmazonSDK's SimpleWorkflow capabilities to make it more intuitive to use for .Net developers.
 
-###Amazon SWF
+### Amazon SWF ###
 Amazon's Simple Workflow (SWF) service provides a scalable platform for automating processes, or workflows in your application.
 It centers around the concept of tasks. Each task will fall into one of two categories:
 * __Activity task__ - for doing actual work, e.g. processing an order, taking data from one location to another
@@ -15,7 +15,7 @@ Every step of a workflow execution is recorded in SWF and you can retrieve the _
 
 You can also easily terminate or rerun a workflow with a few button clicks in the Amazon Management Console, should you choose to.
 
-###Project Goal
+### Project Goal ###
 The standard Amazon SDK provides a [AWS Flow Framework](http://docs.aws.amazon.com/amazonswf/latest/awsflowguide/welcome.html), but it's only available for Java.
 
 The facilities provided by the .Net SDK is a straight mapping to the [actions](http://docs.aws.amazon.com/amazonswf/latest/apireference/Welcome.html) available on the SWF service. Using these actions alone, it's cumbersome to build any sort of useful process out of SWF because you need to take care of a lot of plumbing yourself, including:
@@ -29,7 +29,7 @@ The facilities provided by the .Net SDK is a straight mapping to the [actions](h
 
 The goal of this project is to provide a framework that allows you to design and implement a workflow using SWF with as little friction in the development process as possible.
 
-###Example usages
+### Example usages ###
 Check out the [Wiki](https://github.com/theburningmonk/Amazon.SimpleWorkflow.Extensions/wiki) page for a list of examples.
 
 I also have a series of introductory posts on how to use the library to model workflows:
@@ -40,12 +40,12 @@ I also have a series of introductory posts on how to use the library to model wo
 - Part 4 - Child Workflows (coming soon)
 - Part 5 - Retries (coming soon)
 
-###Nuget
+### Nuget ###
 Download and install using [NuGet](https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions).
 
 <a href="https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions"><img src="http://theburningmonk.com/images/swf-extension-nuget-install.png" alt="NuGet package"/></a>
 
 You can view the full release notes [here](https://github.com/theburningmonk/Amazon.SimpleWorkflow.Extensions/wiki/Release-Notes).
 
-###Keep in touch
-Please follow the official twitter account [@swf_extensions](https://twitter.com/swf_extensions) for updates, and feel free to send me any feedbacks or questions you have about the project :-)
+### Keep in touch
+Please follow the official twitter account [@swf_extensions](https://twitter.com/swf_extensions) for updates, and feel free to send me any feedbacks or questions you have about the project.

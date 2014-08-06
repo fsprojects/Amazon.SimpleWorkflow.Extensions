@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <metadata xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+    <id>@project@</id>
+    <version>@build.number@</version>
+    <authors>@authors@</authors>
+    <owners>@authors@</owners>
+    <licenseUrl>https://github.com/fsprojects/Amazon.SimpleWorkflow.Extensions/blob/master/LICENSE.txt</licenseUrl>
+    <projectUrl>https://github.com/fsprojects/Amazon.SimpleWorkflow.Extensions</projectUrl>
+    <iconUrl>http://theburningmonk.com/images/SWF-Ext logo-small.png</iconUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <summary>Extension to AWSSDK's SimpleWorkflow capabilities to make it intuitive to model and execute workflows without having to deal with all the boilerplate code and complexities involved!</summary>
+    <description>
+      This library provides:
+      - an intuitive API for modelling workflows with Amazon's SimpleWorkflow service
+      - mechanism to automatically exchange data between chained activities/workflows
+      - mechanism to automatically retry failed activities/workflows up to a max number of attempts
+      - a convention based versioning scheme for your activities
+      - mechanism to automatically register domains/workflows/activities
+      - mechanism to automatically register heartbeats for activities
+    </description>
+    <releaseNotes>@releaseNotes@</releaseNotes>
+    <copyright>Copyright @ Yan Cui 2013</copyright>
+    <tags>@tags@</tags>
+    @dependencies@
+  </metadata>
+  <files>
+    <file src="..\build\SWF.Extensions.Core.dll" target="lib/net45" />
+    <file src="..\build\SWF.Extensions.Core.pdb" target="lib/net45" />
+    <file src="..\build\SWF.Extensions.Core.xml" target="lib/net45" />
+    <file src="..\build\SWF.Extensions.CoreCs.dll" target="lib/net45" />
+    <file src="..\build\SWF.Extensions.CoreCs.pdb" target="lib/net45" />
+    <file src="..\build\SWF.Extensions.CoreCs.xml" target="lib/net45" />
+  </files>
+</package>
