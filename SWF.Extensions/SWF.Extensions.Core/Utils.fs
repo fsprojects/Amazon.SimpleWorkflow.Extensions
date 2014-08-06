@@ -65,10 +65,9 @@ module Utils =
 
     type Async = 
         /// Inspired by Tomas's answer here (http://stackoverflow.com/a/18275864/55074)
-        static member StartCatchCancellation(work, ?cancellationToken) =
+        static member StartCatchCancellation(work, ?cancellationToken, ?cancellationCont : Exception -> unit) =
+            let cancellationCont = defaultArg cancellationCont (fun _ -> ())
             Async.FromContinuations(fun (cont, exnCont, _) -> 
-                let cancellationCont e = exnCont e
-
                 Async.StartWithContinuations(work, cont, exnCont, cancellationCont, ?cancellationToken = cancellationToken))
 
         /// Retries the async computation up to specified number of times. Optionally accepts a function to calculate
