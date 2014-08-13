@@ -70,6 +70,17 @@ Target "AssemblyInfo" (fun _ ->
         Attribute.FileVersion   release.AssemblyVersion ] 
 )
 
+// Generate assembly info files with the right version & up-to-date information
+Target "CsAssemblyInfo" (fun _ ->
+  let fileName = "SWF.Extensions/SWF.Extensions.CoreCs/Properties/AssemblyInfo.cs"
+  CreateCSharpAssemblyInfo fileName
+      [ Attribute.Title         project
+        Attribute.Product       project
+        Attribute.Description   summary
+        Attribute.Version       release.AssemblyVersion
+        Attribute.FileVersion   release.AssemblyVersion ] 
+)
+
 // --------------------------------------------------------------------------------------
 // Clean build results & restore NuGet packages
 
@@ -179,6 +190,7 @@ Target "All" DoNothing
 "Clean"
   ==> "RestorePackages"
   ==> "AssemblyInfo"
+  ==> "CsAssemblyInfo"
   ==> "Build"
 //  ==> "RunTests"
   ==> "All"
