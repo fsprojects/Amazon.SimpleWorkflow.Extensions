@@ -32,3 +32,6 @@
 * Updated ServiceStack.Text dependency to v4.0.24
 * More robust exception handling
 * Fixed issues related to async workflow with cancelled token
+
+#### 1.2.1
+* Rollback ServiceStack.Text dependency back to v3 to avoid licensing issue

@@ -16,6 +16,13 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".nuget", ".nuget", "{4EF40F
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SWF.Extensions.CoreCs", "SWF.Extensions.CoreCs\SWF.Extensions.CoreCs.csproj", "{9B2E5BFD-6936-4351-8185-74A3EE03C9A9}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".solution", ".solution", "{F14AECA2-E6FF-433F-B318-2DBEF11D57B1}"
+	ProjectSection(SolutionItems) = preProject
+		..\nuget\Amazon.SimpleWorkflow.Extensions.nuspec = ..\nuget\Amazon.SimpleWorkflow.Extensions.nuspec
+		..\build.fsx = ..\build.fsx
+		..\RELEASE_NOTES.md = ..\RELEASE_NOTES.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
