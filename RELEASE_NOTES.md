@@ -35,3 +35,6 @@
 
 #### 1.2.1
 * Rollback ServiceStack.Text dependency back to v3 to avoid licensing issue
+
+#### 1.2.2
+* Respect the max length on `reason` and `details` in the RespondActivityTaskFailure call

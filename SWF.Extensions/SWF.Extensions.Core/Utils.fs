@@ -12,6 +12,7 @@ module Utils =
     let nullOrWs = String.IsNullOrWhiteSpace
 
     let inline str x = x.ToString()
+    let inline trim n (msg : string) = if msg.Length <= n then msg else msg.Substring(0, n-3) + "..."
 
     // operator which only executes the setter for the property captured by the expr if x is some
     // e.g  Some 2 ?-> <@ x.Length @> // sets the Length property of x to the value 2

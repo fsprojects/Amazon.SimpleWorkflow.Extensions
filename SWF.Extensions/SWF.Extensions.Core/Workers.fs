@@ -11,6 +11,13 @@ open Amazon.SimpleWorkflow.Extensions.Model
 
 open log4net
 
+[<AutoOpen>]
+module internal WorkerUtils = 
+    let trimDetails = trim Constants.maxDetailsLength
+    let trimReason  = trim Constants.maxReasonLength
+
+exception ResultTooLong of int * string
+
 /// Encapsulates the work a decision worker performs (i.e. take a decision task and make some decisions).
 /// This class handles the boilerplate of: 
 ///     polling for tasks
@@ -158,27 +165,34 @@ type ActivityWorker private (
     let getTaskHandler (task : ActivityTask) = 
         let cts = new CancellationTokenSource()
 
-        let respondCompletion result = async {
-            let req = RespondActivityTaskCompletedRequest(TaskToken = task.TaskToken,
-                                                          Result    = result)
-            let work = clt.RespondActivityTaskCompletedAsync(req) |> Async.AwaitTask
-            let! res = Async.WithRetry(work, 3)
-            match res with
-            | Choice2Of2 exn -> onExn(exn)
-            | _              -> ()
-        }
-
         let respondFailure (exn : Exception) = async {
+            let details = (str >> trimDetails) exn
+            let reason  = trimReason exn.Message
+
             // include the exception's message and stacktrace in the response
             let req = RespondActivityTaskFailedRequest(TaskToken = task.TaskToken,
-                                                        Reason    = exn.Message,
-                                                        Details   = exn.ToString())
+                                                       Reason    = reason,
+                                                       Details   = details)
             let work = clt.RespondActivityTaskFailedAsync(req) |> Async.AwaitTask
             let! res = Async.WithRetry(work, 3)
             match res with
             | Choice2Of2 exn -> onExn(exn)
             | _              -> ()
         }
+
+        let respondCompletion (result : string) =
+            if result.Length > Constants.maxResultLength then
+                respondFailure <| ResultTooLong(result.Length, result)
+            else
+                async {
+                    let req = RespondActivityTaskCompletedRequest(TaskToken = task.TaskToken,
+                                                                  Result    = result)
+                    let work = clt.RespondActivityTaskCompletedAsync(req) |> Async.AwaitTask
+                    let! res = Async.WithRetry(work, 3)
+                    match res with
+                    | Choice2Of2 exn -> onExn(exn)
+                    | _              -> ()
+                }
 
         let handler = async {
             try
