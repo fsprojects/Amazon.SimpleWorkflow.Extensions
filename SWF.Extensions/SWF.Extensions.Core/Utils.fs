@@ -3,12 +3,16 @@
 open System
 open System.Collections.Generic
 
-open Microsoft.FSharp.Quotations
+open Microsoft.FSharp.Quotations 
 open Microsoft.FSharp.Quotations.Patterns
 open Microsoft.FSharp.Quotations.DerivedPatterns
 
+open Metricano
+
 [<AutoOpen>]
-module Utils =        
+module Utils =
+    open System.Diagnostics
+
     let nullOrWs = String.IsNullOrWhiteSpace
 
     let inline str x = x.ToString()
@@ -87,3 +91,17 @@ module Utils =
                     | Choice2Of2 exn -> return Choice2Of2 exn
                 }
             loop 0
+
+    let inline recordCountMetric metricName f = 
+        let res = f()
+        MetricsAgent.Default.IncrementCountMetric metricName
+        res
+
+    let inline recordTimeMetric metricName f = 
+        let stopwatch = new Stopwatch()
+        stopwatch.Start()
+        let res = f()
+        stopwatch.Stop()
+
+        MetricsAgent.Default.RecordTimeSpanMetric(metricName, stopwatch.Elapsed)
+        res
