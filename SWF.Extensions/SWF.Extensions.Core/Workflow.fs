@@ -10,6 +10,9 @@ open ServiceStack.Text
 open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Extensions.Model
 
+open Metricano
+open Metricano.Publisher
+
 // #region Interface Definitions
 
 // Marker interface for anything that can be scheduled at a stage of a workflow
@@ -234,12 +237,15 @@ type Activity<'TInput, 'TOutput>(name, description,
                                  ?maxAttempts) =
     let taskList    = defaultArg taskList (name + "TaskList")
     let maxAttempts = defaultArg maxAttempts 1    // by default, only attempt once, i.e. no retry
+    let metricName  = sprintf "%s-%s" name <| defaultArg version ""
 
     let inputSerializer  = JsonSerializer<'TInput>()
     let outputSerializer = JsonSerializer<'TOutput>()
-
-    // use Json serializer to marshall the input and output from-and-to string
-    let processor = inputSerializer.DeserializeFromString >> processor >> outputSerializer.SerializeToString
+    
+    let processInput input = 
+        // use Json serializer to marshall the input and output from-and-to string    
+        let f = inputSerializer.DeserializeFromString >> processor >> outputSerializer.SerializeToString
+        recordTimeMetric metricName (fun _ -> f input)
     
     interface IActivity with
         member this.Name                        = name
@@ -252,7 +258,7 @@ type Activity<'TInput, 'TOutput>(name, description,
         member this.TaskScheduleToCloseTimeout  = taskScheduleToCloseTimeout
         member this.MaxAttempts                 = maxAttempts
 
-        member this.Process (input)             = processor input
+        member this.Process (input)             = processInput input
 
 type Activity = Activity<string, string>
 
@@ -505,6 +511,9 @@ type Workflow (domain, name, description, version, ?taskList,
         if child.ExecutionStartToCloseTimeout.IsNone then failwithf "child workflows must specify execution timeout"
         if child.TaskStartToCloseTimeout.IsNone then failwithf "child workflows must specify decision task timeout"
         if child.ChildPolicy.IsNone then failwithf "child workflows must specify child policy"    
+
+    static let metricsPublisher = new CloudWatchPublisher("Amazon.SimpleWorkflow.Extensions")
+    static do Publish.With(metricsPublisher)
 
     member private this.Append (toStageAction : 'a -> StageAction, args : 'a) = 
         let id = stages.Length
