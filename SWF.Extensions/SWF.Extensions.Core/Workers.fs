@@ -10,6 +10,7 @@ open Amazon.SimpleWorkflow.Extensions
 open Amazon.SimpleWorkflow.Extensions.Model
 
 open log4net
+open Metricano
 
 [<AutoOpen>]
 module internal WorkerUtils = 
@@ -18,13 +19,25 @@ module internal WorkerUtils =
 
 exception ResultTooLong of int * string
 
+[<RequireQualifiedAccess>]
+module private MetricNames =
+    let activityTasksReceived       = "ActivityTasksReceived"
+    let activityTasksCompleted      = "ActivityTasksCompleted"
+    let activityTasksFailed         = "ActivityTasksFailed"
+    let activityWorkerApiErrors     = "ActivityWorkerApiErrors"
+    let decisionTasksReceived       = "DecisionTasksReceived"
+    let decisionTasksCompleted      = "DecisionTasksCompleted"
+    let decisionWorkerApiErrors     = "DecisionWorkerApiErrors"
+    let decisionWorkerLogicErrors   = "DecisionWorkerLogicErrors"
+
 /// Encapsulates the work a decision worker performs (i.e. take a decision task and make some decisions).
 /// This class handles the boilerplate of: 
 ///     polling for tasks
 ///     responding with decisions
 ///     handling exceptions
 type DecisionWorker private (
-                                clt          : IAmazonSimpleWorkflow,
+                                swfClient    : IAmazonSimpleWorkflow,
+                                metricsAgent : IMetricsAgent,
                                 domain       : string,
                                 tasklist     : string,
                                 // function that makes the decisions based on task, and a new execution context
@@ -42,12 +55,16 @@ type DecisionWorker private (
                                              TaskList     = new TaskList(Name = tasklist))
         <@ req.Identity @> <-? identity
 
-        let work = clt.PollForDecisionTaskAsync(req) |> Async.AwaitTask
+        let work = swfClient.PollForDecisionTaskAsync(req) |> Async.AwaitTask
         let! res = Async.WithRetry(work, 3)
         match res with
-        | Choice1Of2 pollRes -> return Some pollRes
-        | Choice2Of2 exn     -> onExn exn
-                                return None
+        | Choice1Of2 pollRes -> 
+            metricsAgent.IncrementCountMetric(MetricNames.decisionTasksReceived)
+            return Some pollRes
+        | Choice2Of2 exn -> 
+            metricsAgent.IncrementCountMetric(MetricNames.decisionWorkerApiErrors)
+            onExn exn
+            return None
     }
 
     let respond token (decisions : Decision[]) execContext = async {
@@ -57,12 +74,16 @@ type DecisionWorker private (
         |> Seq.map (fun x -> x.ToSwfDecision())
         |> req.Decisions.AddRange
 
-        let work = clt.RespondDecisionTaskCompletedAsync(req) |> Async.AwaitTask 
+        let work = swfClient.RespondDecisionTaskCompletedAsync(req) |> Async.AwaitTask 
         let! res = Async.WithRetry(work, 3)
         match res with
-        | Choice1Of2 _   -> return ()
-        | Choice2Of2 exn -> onExn exn
-                            return ()
+        | Choice1Of2 _   -> 
+            metricsAgent.IncrementCountMetric(MetricNames.decisionTasksCompleted)
+            return ()
+        | Choice2Of2 exn -> 
+            metricsAgent.IncrementCountMetric(MetricNames.decisionWorkerApiErrors)
+            onExn exn
+            return ()
     }
 
     let handler = async {
@@ -71,12 +92,12 @@ type DecisionWorker private (
                 let! pollRes = pollForTask()
                 match pollRes with
                 | Some pollRes when not <| nullOrWs pollRes.DecisionTask.TaskToken ->                    
-                    let task = DecisionTask(pollRes.DecisionTask, clt, domain, tasklist)
-                    let decisions, execContext = decide(clt, task) 
+                    let task = DecisionTask(pollRes.DecisionTask, swfClient, domain, tasklist)
+                    let decisions, execContext = decide(swfClient, task) 
                     do! respond task.TaskToken decisions execContext
                 | _ -> ()
             with exn -> 
-                // invoke the supplied exception handler
+                metricsAgent.IncrementCountMetric(MetricNames.decisionWorkerLogicErrors)
                 onExn(exn)
     }
 
@@ -89,16 +110,18 @@ type DecisionWorker private (
                 (fun canExn -> logger.Error("Async workflow has been cancelled.", canExn))))
 
     /// Starts a decision worker with C# lambdas with minimal set of inputs
-    static member Start(clt             : IAmazonSimpleWorkflow,
+    static member Start(swfClient       : IAmazonSimpleWorkflow,
+                        metricsAgent    : IMetricsAgent,
                         domain          : string,
                         tasklist        : string,                        
                         decide          : Func<IAmazonSimpleWorkflow, DecisionTask, Decision[] * string>,
                         onExn           : Action<Exception>) =
         let decide, onExn = (fun t -> decide.Invoke(t)), (fun exn -> onExn.Invoke(exn))
-        DecisionWorker(clt, domain, tasklist, decide, onExn) |> ignore
+        DecisionWorker(swfClient, metricsAgent, domain, tasklist, decide, onExn) |> ignore
     
     /// Starts a decision worker with C# lambdas with greedy set of inputs
-    static member Start(clt             : IAmazonSimpleWorkflow,
+    static member Start(swfClient       : IAmazonSimpleWorkflow,
+                        metricsAgent    : IMetricsAgent,
                         domain          : string,
                         tasklist        : string,                        
                         decide          : Func<IAmazonSimpleWorkflow, DecisionTask, Decision[] * string>,
@@ -106,17 +129,18 @@ type DecisionWorker private (
                         identity        : Identity,
                         concurrency     : int) =
         let decide, onExn = (fun t -> decide.Invoke(t)), (fun exn -> onExn.Invoke(exn))
-        DecisionWorker(clt, domain, tasklist, decide, onExn, identity, concurrency) |> ignore
+        DecisionWorker(swfClient, metricsAgent, domain, tasklist, decide, onExn, identity, concurrency) |> ignore
 
     /// Starts a decision worker with F# functions, optionally specifying the level of concurrency to use
-    static member Start(clt             : IAmazonSimpleWorkflow,
+    static member Start(swfClient       : IAmazonSimpleWorkflow,
+                        metricsAgent    : IMetricsAgent,
                         domain          : string,
                         tasklist        : string,                        
                         decide          : IAmazonSimpleWorkflow * DecisionTask -> Decision[] * string,
                         onExn           : Exception -> unit,
                         ?identity       : Identity,
                         ?concurrency    : int) =
-        DecisionWorker(clt, domain, tasklist, decide, onExn, ?identity = identity, ?concurrency = concurrency) |> ignore
+        DecisionWorker(swfClient, metricsAgent, domain, tasklist, decide, onExn, ?identity = identity, ?concurrency = concurrency) |> ignore
 
 /// Encapsulates the work an activity worker performs (i.e. taking an activity task and doing something with it).
 /// This class handles the boilerplate of:
@@ -126,7 +150,8 @@ type DecisionWorker private (
 ///     responding with complete when handling code succeeds
 ///     handling other exceptions
 type ActivityWorker private (
-                                clt             : IAmazonSimpleWorkflow,
+                                swfClient       : IAmazonSimpleWorkflow,
+                                metricsAgent    : IMetricsAgent,
                                 domain          : string,
                                 tasklist        : string,
                                 work            : string -> string,            // function that performs the activity and returns its result
@@ -144,19 +169,23 @@ type ActivityWorker private (
         let req = PollForActivityTaskRequest(Domain = domain, TaskList = TaskList(Name = tasklist))
         <@ req.Identity @> <-? identity
 
-        let work = clt.PollForActivityTaskAsync(req) |> Async.AwaitTask
+        let work = swfClient.PollForActivityTaskAsync(req) |> Async.AwaitTask
         let! res = Async.WithRetry(work, 3)
         match res with
-        | Choice1Of2 pollRes -> return Some pollRes.ActivityTask
-        | Choice2Of2 exn     -> onExn exn
-                                return None
+        | Choice1Of2 pollRes -> 
+            metricsAgent.IncrementCountMetric(MetricNames.activityTasksReceived)
+            return Some pollRes.ActivityTask
+        | Choice2Of2 exn -> 
+            metricsAgent.IncrementCountMetric(MetricNames.activityWorkerApiErrors)
+            onExn exn
+            return None
     }
 
     // function to record heartbeats periodically
     let recordHeartbeat (task : ActivityTask) = async {
         while true do
             let req = RecordActivityTaskHeartbeatRequest(TaskToken = task.TaskToken)
-            let work = clt.RecordActivityTaskHeartbeatAsync(req) |> Async.AwaitTask
+            let work = swfClient.RecordActivityTaskHeartbeatAsync(req) |> Async.AwaitTask
             do! Async.WithRetry(work, 1) |> Async.Ignore
             do! Async.Sleep(int heartbeatFreq.TotalMilliseconds)
     }
@@ -173,11 +202,13 @@ type ActivityWorker private (
             let req = RespondActivityTaskFailedRequest(TaskToken = task.TaskToken,
                                                        Reason    = reason,
                                                        Details   = details)
-            let work = clt.RespondActivityTaskFailedAsync(req) |> Async.AwaitTask
+            let work = swfClient.RespondActivityTaskFailedAsync(req) |> Async.AwaitTask
             let! res = Async.WithRetry(work, 3)
             match res with
-            | Choice2Of2 exn -> onExn(exn)
-            | _              -> ()
+            | Choice2Of2 exn -> 
+                metricsAgent.IncrementCountMetric(MetricNames.activityWorkerApiErrors)
+                onExn(exn)
+            | _ -> metricsAgent.IncrementCountMetric(MetricNames.activityTasksFailed)
         }
 
         let respondCompletion (result : string) =
@@ -187,11 +218,13 @@ type ActivityWorker private (
                 async {
                     let req = RespondActivityTaskCompletedRequest(TaskToken = task.TaskToken,
                                                                   Result    = result)
-                    let work = clt.RespondActivityTaskCompletedAsync(req) |> Async.AwaitTask
+                    let work = swfClient.RespondActivityTaskCompletedAsync(req) |> Async.AwaitTask
                     let! res = Async.WithRetry(work, 3)
                     match res with
-                    | Choice2Of2 exn -> onExn(exn)
-                    | _              -> ()
+                    | Choice2Of2 exn -> 
+                        metricsAgent.IncrementCountMetric(MetricNames.activityWorkerApiErrors)
+                        onExn(exn)
+                    | _ -> metricsAgent.IncrementCountMetric(MetricNames.activityTasksCompleted)
                 }
 
         let handler = async {
@@ -234,26 +267,29 @@ type ActivityWorker private (
                 (fun canExn -> logger.Error("Async workflow has been cancelled.", canExn))))
 
     /// Starts an activity worker with C# lambdas with minimal set of inputs
-    static member Start(clt             : IAmazonSimpleWorkflow,
+    static member Start(swfClient       : IAmazonSimpleWorkflow,
+                        metricsAgent    : IMetricsAgent,
                         domain          : string,
                         tasklist        : string,                        
                         work            : Func<string, string>,
                         onExn           : Action<Exception>) =
         let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
-        ActivityWorker(clt, domain, tasklist, work, onExn) |> ignore
+        ActivityWorker(swfClient, metricsAgent, domain, tasklist, work, onExn) |> ignore
 
     /// Starts an activity worker with C# lambdas, and specifies the heart beat frequency to use
-    static member Start(clt             : IAmazonSimpleWorkflow,
+    static member Start(swfClient       : IAmazonSimpleWorkflow,
+                        metricsAgent    : IMetricsAgent,
                         domain          : string,
                         tasklist        : string,                        
                         work            : Func<string, string>,
                         onExn           : Action<Exception>,
                         heartbeatFreq   : TimeSpan) =
         let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
-        ActivityWorker(clt, domain, tasklist, work, onExn, ?heartbeatFreq = Some heartbeatFreq) |> ignore
+        ActivityWorker(swfClient, metricsAgent, domain, tasklist, work, onExn, ?heartbeatFreq = Some heartbeatFreq) |> ignore
 
     /// Starts an activity worker with C# lambdas with greedy set of inputs
-    static member Start(clt             : IAmazonSimpleWorkflow,
+    static member Start(swfClient       : IAmazonSimpleWorkflow,
+                        metricsAgent    : IMetricsAgent,
                         domain          : string,
                         tasklist        : string,                        
                         work            : Func<string, string>,
@@ -262,10 +298,11 @@ type ActivityWorker private (
                         identity        : Identity,                        
                         concurrency     : int) =
         let work, onExn = (fun t -> work.Invoke(t)), (fun exn -> onExn.Invoke(exn))
-        ActivityWorker(clt, domain, tasklist, work, onExn, heartbeatFreq, identity, concurrency) |> ignore
+        ActivityWorker(swfClient, metricsAgent, domain, tasklist, work, onExn, heartbeatFreq, identity, concurrency) |> ignore
 
     /// Starts an activity worker with F# functions
-    static member Start(clt             : IAmazonSimpleWorkflow,
+    static member Start(swfClient       : IAmazonSimpleWorkflow,
+                        metricsAgent    : IMetricsAgent,
                         domain          : string,
                         tasklist        : string,                        
                         work            : string -> string,
@@ -273,4 +310,4 @@ type ActivityWorker private (
                         ?heartbeatFreq  : TimeSpan,
                         ?identity       : Identity,                        
                         ?concurrency    : int) =
-        ActivityWorker(clt, domain, tasklist, work, onExn, ?heartbeatFreq = heartbeatFreq, ?identity = identity, ?concurrency = concurrency) |> ignore
+        ActivityWorker(swfClient, metricsAgent, domain, tasklist, work, onExn, ?heartbeatFreq = heartbeatFreq, ?identity = identity, ?concurrency = concurrency) |> ignore

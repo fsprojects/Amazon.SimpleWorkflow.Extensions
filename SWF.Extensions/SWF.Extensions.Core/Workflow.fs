@@ -498,30 +498,39 @@ type Workflow (domain, name, description, version, ?taskList,
             // we're still waiting for a child workflow to finish, do nothing for now
             [||], getLastExecContext()
 
-    let startDecisionWorker clt  = DecisionWorker.Start(clt, domain, taskList.Name, decide, onDecisionTaskError.Trigger, ?identity = identity)
-    let startActivityWorkers clt = 
+    let startDecisionWorker swfClient metricsAgent = 
+        DecisionWorker.Start(swfClient, metricsAgent, domain, taskList.Name, decide, onDecisionTaskError.Trigger, ?identity = identity)
+    
+    let startActivityWorkers swfClient metricsAgent = 
         activities
         |> List.iter (fun activity -> 
             // leave some buffer for heart beat frequency, record a heartbeat every 75% of the timeout
             let heartbeat = TimeSpan.FromSeconds(float activity.TaskHeartbeatTimeout * 0.75)
-            ActivityWorker.Start(clt, domain, activity.TaskList.Name, activity.Process, onActivityTaskError.Trigger, heartbeat, ?identity = identity))
+            ActivityWorker.Start(swfClient, metricsAgent, domain, activity.TaskList.Name, activity.Process, onActivityTaskError.Trigger, heartbeat, ?identity = identity))
+    
     let startChildWorkflows (swfClt : Amazon.SimpleWorkflow.IAmazonSimpleWorkflow) 
                             (cwClt  : Amazon.CloudWatch.IAmazonCloudWatch) = 
         childWorkflows |> List.iter (fun workflow -> workflow.Start(swfClt, cwClt))
 
-    let start swfClt cwClt = 
-        register swfClt |> ignore
-        startDecisionWorker  swfClt
-        startActivityWorkers swfClt
-        startChildWorkflows  swfClt cwClt
+    /// Starts the metrics publisher to track CloudWatch metrics and returns the metrics collection agent for use by this particular workflow
+    let startMetricPublisher (cloudWatch : Amazon.CloudWatch.IAmazonCloudWatch) =
+        let publisher    = new CloudWatchPublisher("SimpleWorkflow.Extensions", cloudWatch)
+        let metricsAgent = MetricsAgent.Create()
+        Publish.With(metricsAgent, publisher)
+        metricsAgent
+
+    let start swfClient cloudWatch = 
+        let metricsAgent = startMetricPublisher cloudWatch
+
+        register swfClient |> ignore
+        startDecisionWorker  swfClient metricsAgent
+        startActivityWorkers swfClient metricsAgent
+        startChildWorkflows  swfClient cloudWatch
 
     static let validateChildWorkflow (child : IWorkflow) =
         if child.ExecutionStartToCloseTimeout.IsNone then failwithf "child workflows must specify execution timeout"
         if child.TaskStartToCloseTimeout.IsNone then failwithf "child workflows must specify decision task timeout"
-        if child.ChildPolicy.IsNone then failwithf "child workflows must specify child policy"    
-
-    static let metricsPublisher = new CloudWatchPublisher("Amazon.SimpleWorkflow.Extensions")
-    static do Publish.With(metricsPublisher)
+        if child.ChildPolicy.IsNone then failwithf "child workflows must specify child policy"
 
     member private this.Append (toStageAction : 'a -> StageAction, args : 'a) = 
         let id = stages.Length
