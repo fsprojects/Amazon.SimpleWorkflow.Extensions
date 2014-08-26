@@ -49,11 +49,18 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="AWSSDK">
-      <HintPath>..\packages\AWSSDK.2.2.2.0\lib\net45\AWSSDK.dll</HintPath>
-      <Private>True</Private>
+      <HintPath>..\packages\AWSSDK.2.2.4.0\lib\net45\AWSSDK.dll</HintPath>
     </Reference>
     <Reference Include="log4net">
       <HintPath>..\packages\log4net.2.0.3\lib\net40-full\log4net.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Metricano">
+      <HintPath>..\packages\Metricano.0.1.0\lib\net40\Metricano.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Metricano.CloudWatch">
+      <HintPath>..\packages\Metricano.CloudWatch.0.1.0\lib\net45\Metricano.CloudWatch.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="mscorlib" />
