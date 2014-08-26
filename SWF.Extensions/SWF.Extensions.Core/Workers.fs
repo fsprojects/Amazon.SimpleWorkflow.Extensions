@@ -24,11 +24,11 @@ exception ResultTooLong of int * string
 ///     responding with decisions
 ///     handling exceptions
 type DecisionWorker private (
-                                clt          : AmazonSimpleWorkflowClient,
+                                clt          : IAmazonSimpleWorkflow,
                                 domain       : string,
                                 tasklist     : string,
                                 // function that makes the decisions based on task, and a new execution context
-                                decide       : AmazonSimpleWorkflowClient * DecisionTask -> Decision[] * string, 
+                                decide       : IAmazonSimpleWorkflow * DecisionTask -> Decision[] * string, 
                                 onExn        : Exception -> unit,                   // function that handles exceptions
                                 ?identity    : Identity,                            // identity of the worker (e.g. instance ID, IP, etc.)
                                 ?concurrency : int                                  // the number of concurrent workers
@@ -89,19 +89,19 @@ type DecisionWorker private (
                 (fun canExn -> logger.Error("Async workflow has been cancelled.", canExn))))
 
     /// Starts a decision worker with C# lambdas with minimal set of inputs
-    static member Start(clt             : AmazonSimpleWorkflowClient,
+    static member Start(clt             : IAmazonSimpleWorkflow,
                         domain          : string,
                         tasklist        : string,                        
-                        decide          : Func<AmazonSimpleWorkflowClient, DecisionTask, Decision[] * string>,
+                        decide          : Func<IAmazonSimpleWorkflow, DecisionTask, Decision[] * string>,
                         onExn           : Action<Exception>) =
         let decide, onExn = (fun t -> decide.Invoke(t)), (fun exn -> onExn.Invoke(exn))
         DecisionWorker(clt, domain, tasklist, decide, onExn) |> ignore
     
     /// Starts a decision worker with C# lambdas with greedy set of inputs
-    static member Start(clt             : AmazonSimpleWorkflowClient,
+    static member Start(clt             : IAmazonSimpleWorkflow,
                         domain          : string,
                         tasklist        : string,                        
-                        decide          : Func<AmazonSimpleWorkflowClient, DecisionTask, Decision[] * string>,
+                        decide          : Func<IAmazonSimpleWorkflow, DecisionTask, Decision[] * string>,
                         onExn           : Action<Exception>,
                         identity        : Identity,
                         concurrency     : int) =
@@ -109,10 +109,10 @@ type DecisionWorker private (
         DecisionWorker(clt, domain, tasklist, decide, onExn, identity, concurrency) |> ignore
 
     /// Starts a decision worker with F# functions, optionally specifying the level of concurrency to use
-    static member Start(clt             : AmazonSimpleWorkflowClient,
+    static member Start(clt             : IAmazonSimpleWorkflow,
                         domain          : string,
                         tasklist        : string,                        
-                        decide          : AmazonSimpleWorkflowClient * DecisionTask -> Decision[] * string,
+                        decide          : IAmazonSimpleWorkflow * DecisionTask -> Decision[] * string,
                         onExn           : Exception -> unit,
                         ?identity       : Identity,
                         ?concurrency    : int) =
@@ -126,7 +126,7 @@ type DecisionWorker private (
 ///     responding with complete when handling code succeeds
 ///     handling other exceptions
 type ActivityWorker private (
-                                clt             : AmazonSimpleWorkflowClient,
+                                clt             : IAmazonSimpleWorkflow,
                                 domain          : string,
                                 tasklist        : string,
                                 work            : string -> string,            // function that performs the activity and returns its result
@@ -234,7 +234,7 @@ type ActivityWorker private (
                 (fun canExn -> logger.Error("Async workflow has been cancelled.", canExn))))
 
     /// Starts an activity worker with C# lambdas with minimal set of inputs
-    static member Start(clt             : AmazonSimpleWorkflowClient,
+    static member Start(clt             : IAmazonSimpleWorkflow,
                         domain          : string,
                         tasklist        : string,                        
                         work            : Func<string, string>,
@@ -243,7 +243,7 @@ type ActivityWorker private (
         ActivityWorker(clt, domain, tasklist, work, onExn) |> ignore
 
     /// Starts an activity worker with C# lambdas, and specifies the heart beat frequency to use
-    static member Start(clt             : AmazonSimpleWorkflowClient,
+    static member Start(clt             : IAmazonSimpleWorkflow,
                         domain          : string,
                         tasklist        : string,                        
                         work            : Func<string, string>,
@@ -253,7 +253,7 @@ type ActivityWorker private (
         ActivityWorker(clt, domain, tasklist, work, onExn, ?heartbeatFreq = Some heartbeatFreq) |> ignore
 
     /// Starts an activity worker with C# lambdas with greedy set of inputs
-    static member Start(clt             : AmazonSimpleWorkflowClient,
+    static member Start(clt             : IAmazonSimpleWorkflow,
                         domain          : string,
                         tasklist        : string,                        
                         work            : Func<string, string>,
@@ -265,7 +265,7 @@ type ActivityWorker private (
         ActivityWorker(clt, domain, tasklist, work, onExn, heartbeatFreq, identity, concurrency) |> ignore
 
     /// Starts an activity worker with F# functions
-    static member Start(clt             : AmazonSimpleWorkflowClient,
+    static member Start(clt             : IAmazonSimpleWorkflow,
                         domain          : string,
                         tasklist        : string,                        
                         work            : string -> string,

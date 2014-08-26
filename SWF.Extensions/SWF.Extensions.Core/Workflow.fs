@@ -3,6 +3,7 @@
 open System
 open System.Collections.Generic
 
+open Amazon
 open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Model
 open ServiceStack.Text
@@ -12,6 +13,9 @@ open Amazon.SimpleWorkflow.Extensions.Model
 
 open Metricano
 open Metricano.Publisher
+
+type AwsAccessKeyId     = string
+type AwsSecretAccessKey = string
 
 // #region Interface Definitions
 
@@ -45,7 +49,9 @@ type IWorkflow =
     abstract member ExecutionStartToCloseTimeout : Seconds option
     abstract member ChildPolicy                  : ChildPolicy option
 
-    abstract member Start       : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient -> unit
+    abstract member Start : AwsAccessKeyId * AwsSecretAccessKey * Amazon.RegionEndpoint -> unit
+    abstract member Start : Amazon.Runtime.AWSCredentials * Amazon.RegionEndpoint -> unit
+    abstract member Start : Amazon.SimpleWorkflow.IAmazonSimpleWorkflow * Amazon.CloudWatch.IAmazonCloudWatch -> unit
 
 // #endregion
 
@@ -302,7 +308,7 @@ type Workflow (domain, name, description, version, ?taskList,
     let getStage n = if n >= stages.Length then None else List.nth stages n |> Some
 
     // registers the workflow and activity types
-    let register (clt : Amazon.SimpleWorkflow.AmazonSimpleWorkflowClient) = 
+    let register (clt : Amazon.SimpleWorkflow.IAmazonSimpleWorkflow) = 
         let registerActivities stages = async {
             let req  = ListActivityTypesRequest(Domain = domain, RegistrationStatus = swfRegStatus Registered)
             let! res = clt.ListActivityTypesAsync(req) |> Async.AwaitTask
@@ -398,7 +404,7 @@ type Workflow (domain, name, description, version, ?taskList,
         | None -> onWorkflowCompleted.Trigger(domain, name)
                   [| CompleteWorkflowExecution input |], ""
 
-    let decide (swfClient : AmazonSimpleWorkflowClient, task : DecisionTask) =
+    let decide (swfClient : IAmazonSimpleWorkflow, task : DecisionTask) =
         let getLastExecContext () =
             let req = DescribeWorkflowExecutionRequest(Domain = domain, Execution = task.WorkflowExecution)
             let res = swfClient.DescribeWorkflowExecution(req)
@@ -499,13 +505,15 @@ type Workflow (domain, name, description, version, ?taskList,
             // leave some buffer for heart beat frequency, record a heartbeat every 75% of the timeout
             let heartbeat = TimeSpan.FromSeconds(float activity.TaskHeartbeatTimeout * 0.75)
             ActivityWorker.Start(clt, domain, activity.TaskList.Name, activity.Process, onActivityTaskError.Trigger, heartbeat, ?identity = identity))
-    let startChildWorkflows clt = childWorkflows |> List.iter (fun workflow -> workflow.Start clt)
+    let startChildWorkflows (swfClt : Amazon.SimpleWorkflow.IAmazonSimpleWorkflow) 
+                            (cwClt  : Amazon.CloudWatch.IAmazonCloudWatch) = 
+        childWorkflows |> List.iter (fun workflow -> workflow.Start(swfClt, cwClt))
 
-    let start clt = 
-        register clt |> ignore
-        startDecisionWorker  clt
-        startActivityWorkers clt
-        startChildWorkflows  clt
+    let start swfClt cwClt = 
+        register swfClt |> ignore
+        startDecisionWorker  swfClt
+        startActivityWorkers swfClt
+        startChildWorkflows  swfClt cwClt
 
     static let validateChildWorkflow (child : IWorkflow) =
         if child.ExecutionStartToCloseTimeout.IsNone then failwithf "child workflows must specify execution timeout"
@@ -545,7 +553,19 @@ type Workflow (domain, name, description, version, ?taskList,
         member this.TaskStartToCloseTimeout      = taskStartToCloseTimeout
         member this.ExecutionStartToCloseTimeout = execStartToCloseTimeout
         member this.ChildPolicy                  = childPolicy
-        member this.Start swfClt                 = start swfClt
+
+        member this.Start (awsAccessKeyId, awsSecretAccessKey, region) = 
+            let swfClient = AWSClientFactory.CreateAmazonSimpleWorkflowClient(awsAccessKeyId, awsSecretAccessKey, region)
+            let cwClient  = AWSClientFactory.CreateAmazonCloudWatchClient(awsAccessKeyId, awsSecretAccessKey, region)
+            start swfClient cwClient
+
+        member this.Start (credentials : Amazon.Runtime.AWSCredentials, region : Amazon.RegionEndpoint) =
+            let swfClient = AWSClientFactory.CreateAmazonSimpleWorkflowClient(credentials, region)
+            let cwClient  = AWSClientFactory.CreateAmazonCloudWatchClient(credentials, region)
+            start swfClient cwClient
+
+        member this.Start (swfClient, cwClient) =
+            start swfClient cwClient
                 
     member this.NumberOfStages                   = stages.Length
     member this.Start swfClt                     = start swfClt
