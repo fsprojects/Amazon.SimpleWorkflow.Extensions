@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Threading;
 
+using Amazon.CloudWatch;
 using Amazon.SimpleWorkflow;
 using Amazon.SimpleWorkflow.Extensions;
 
@@ -24,19 +25,21 @@ namespace ExampleCs
         private static void StartHelloWorldWorkflow()
         {
             var client = new AmazonSimpleWorkflowClient();
+            var cloudwatch = new AmazonCloudWatchClient();
 
             var activity = WorkflowFactory.CreateActivity<string, string>("hello_world", HelloWorld, 60, 10, 10, 20)
                                           .Complete();
             var workflow = WorkflowFactory.CreateWorkflow("theburningmonk.com", "hello_world_cs", "1")
                                           .Attach(activity)
                                           .Complete();
-            
-            workflow.Start(client);
+
+            workflow.Start(client, cloudwatch);
         }
 
         private static void StartEchoWorkflow()
         {
             var client = new AmazonSimpleWorkflowClient();
+            var cloudwatch = new AmazonCloudWatchClient();
 
             var activity = WorkflowFactory.CreateActivity<string, string>("echo", Echo, 60, 10, 10, 20)
                                           .Complete();
@@ -44,12 +47,13 @@ namespace ExampleCs
                                           .Attach(activity)
                                           .Complete();
             
-            workflow.Start(client);
+            workflow.Start(client, cloudwatch);
         }
 
         private static void StartCountHtmlElementsWorkflow()
         {
             var client = new AmazonSimpleWorkflowClient();
+            var cloudwatch = new AmazonCloudWatchClient();
 
             var echo = WorkflowFactory.CreateActivity<string, string>("echo", Echo, 60, 10, 10, 20)
                                       .Complete();
@@ -69,7 +73,7 @@ namespace ExampleCs
                                           .Attach(echo)
                                           .Complete();
             
-            workflow.Start(client);
+            workflow.Start(client, cloudwatch);
         }
 
         private static string HelloWorld(string _)

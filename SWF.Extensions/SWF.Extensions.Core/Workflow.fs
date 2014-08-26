@@ -586,7 +586,6 @@ type Workflow (domain, name, description, version, ?taskList,
             start swfClient cwClient
                 
     member this.NumberOfStages                   = stages.Length
-    member this.Start swfClt                     = start swfClt
 
     // #region Operators
 
@@ -595,7 +594,7 @@ type Workflow (domain, name, description, version, ?taskList,
         validateChildWorkflow childWorkflow
         workflow.Append(StartChildWorkflow, childWorkflow)
     static member (++>) (workflow : Workflow, (schedulables, _ as parallelActions) : ISchedulable[] * Reducer) =
-        let childWorkflows = getWorkflows schedulables |> Array.iter validateChildWorkflow
+        getWorkflows schedulables |> Array.iter validateChildWorkflow
         workflow.Append(ParallelActions, parallelActions)
 
     // #endregion

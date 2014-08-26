@@ -3,21 +3,24 @@
 
 #load "BasicExamples.fs"
 
+open Amazon
 open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Extensions
 
 let awsKey      = "PUT_YOUR_AWS_KEY_HERE"
 let awsSecret   = "PUT_YOUR_AWS_SECRET_HERE"
-let client = new AmazonSimpleWorkflowClient(awsKey, awsSecret)
+
+let start (workflow : IWorkflow) =
+    workflow.Start(awsKey, awsSecret, Amazon.RegionEndpoint.USEast1)
 
 // uncomment the example you want to run to test it out
-//BasicExamples.helloWorldWorkflow.Start(client)
-//BasicExamples.echoWorkflow.Start(client)
-//BasicExamples.genericActivityWorkflow.Start(client)
-//BasicExamples.simplePipelineWorkflow.Start(client)
-//BasicExamples.withChildWorkflow.Start(client)
-//BasicExamples.failedWorkflowWithActivity.Start(client)
-//BasicExamples.failedWorkflowWithChildWorkflow.Start(client)
-//BasicExamples.parallelActivities.Start(client)
-//BasicExamples.parallelSchedulables.Start(client)
-//BasicExamples.failedParallelSchedulables.Start(client)
+//start BasicExamples.helloWorldWorkflow
+//start BasicExamples.echoWorkflow
+//start BasicExamples.genericActivityWorkflow
+//start BasicExamples.simplePipelineWorkflow
+//start BasicExamples.withChildWorkflow
+//start BasicExamples.failedWorkflowWithActivity
+//start BasicExamples.failedWorkflowWithChildWorkflow
+//start BasicExamples.parallelActivities
+//start BasicExamples.parallelSchedulables
+//start BasicExamples.failedParallelSchedulables
