@@ -19,17 +19,6 @@ module internal WorkerUtils =
 
 exception ResultTooLong of int * string
 
-[<RequireQualifiedAccess>]
-module private MetricNames =
-    let activityTasksReceived       = "ActivityTasksReceived"
-    let activityTasksCompleted      = "ActivityTasksCompleted"
-    let activityTasksFailed         = "ActivityTasksFailed"
-    let activityWorkerApiErrors     = "ActivityWorkerApiErrors"
-    let decisionTasksReceived       = "DecisionTasksReceived"
-    let decisionTasksCompleted      = "DecisionTasksCompleted"
-    let decisionWorkerApiErrors     = "DecisionWorkerApiErrors"
-    let decisionWorkerLogicErrors   = "DecisionWorkerLogicErrors"
-
 /// Encapsulates the work a decision worker performs (i.e. take a decision task and make some decisions).
 /// This class handles the boilerplate of: 
 ///     polling for tasks

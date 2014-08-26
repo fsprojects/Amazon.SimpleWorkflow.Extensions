@@ -287,6 +287,7 @@ type Workflow (domain, name, description, version, ?taskList,
     let onActivityTaskError = new Event<Exception>()
     let onActivityFailed    = new Event<Domain * Name * ActivityId * Details option * Reason option>()
     let onWorkflowFailed    = new Event<Domain * Name * RunId * Details option * Reason option>()
+    let onWorkflowStarted   = new Event<Domain * Name>()
     let onWorkflowCompleted = new Event<Domain * Name>()
 
     // sort the stages by Id
@@ -465,7 +466,9 @@ type Workflow (domain, name, description, version, ?taskList,
         let keyEvt = events |> Seq.pick (function | KeyEvent evtType -> Some evtType | _ -> None)
 
         match keyEvt with
-        | WorkflowExecutionStarted(_, _, _, _, _, _, _, input, _, _) -> scheduleStage 0 input 0
+        | WorkflowExecutionStarted(_, _, _, _, _, _, _, input, _, _) -> 
+            onWorkflowStarted.Trigger(domain, name)
+            scheduleStage 0 input 0
 
         // when activities and workflows completed/failed, we need to go back to the event that scheduled them in order
         // to get the control data we need to find out the state of that stage of the workflow in order to decide
@@ -517,6 +520,11 @@ type Workflow (domain, name, description, version, ?taskList,
         let publisher    = new CloudWatchPublisher("SimpleWorkflow.Extensions", cloudWatch)
         let metricsAgent = MetricsAgent.Create()
         Publish.With(metricsAgent, publisher)
+
+        do onWorkflowStarted.Publish.Add(fun _ -> metricsAgent.IncrementCountMetric(MetricNames.workflowsStarted))
+        do onWorkflowCompleted.Publish.Add(fun _ -> metricsAgent.IncrementCountMetric(MetricNames.workflowsCompleted))
+        do onWorkflowFailed.Publish.Add(fun _ -> metricsAgent.IncrementCountMetric(MetricNames.workflowsFailed))
+
         metricsAgent
 
     let start swfClient cloudWatch = 
@@ -549,6 +557,7 @@ type Workflow (domain, name, description, version, ?taskList,
     [<CLIEvent>] member this.OnActivityTaskError = onActivityTaskError.Publish
     [<CLIEvent>] member this.OnActivityFailed    = onActivityFailed.Publish
     [<CLIEvent>] member this.OnWorkflowFailed    = onWorkflowFailed.Publish
+    [<CLIEvent>] member this.OnWorkflowStarted   = onWorkflowStarted.Publish
     [<CLIEvent>] member this.OnWorkflowCompleted = onWorkflowCompleted.Publish
 
     // #endregion
