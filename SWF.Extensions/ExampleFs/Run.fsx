@@ -1,5 +1,4 @@
 ﻿#r "bin/Debug/AWSSDK.dll"
-#r "bin/Debug/Metricano.dll"
 #r "bin/Debug/SWF.Extensions.Core.dll"
 
 open Amazon

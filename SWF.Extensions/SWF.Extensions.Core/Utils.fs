@@ -9,8 +9,6 @@ open Microsoft.FSharp.Quotations
 open Microsoft.FSharp.Quotations.Patterns
 open Microsoft.FSharp.Quotations.DerivedPatterns
 
-open Metricano
-
 [<AutoOpen>]
 module internal Utils =
     let nullOrWs = String.IsNullOrWhiteSpace
@@ -92,12 +90,3 @@ module internal Utils =
                     | Choice2Of2 exn -> return Choice2Of2 exn
                 }
             loop 0
-
-    let inline recordTimeMetric (metricsAgent : IMetricsAgent) metricName f = 
-        let stopwatch = new Stopwatch()
-        stopwatch.Start()
-        let res = f()
-        stopwatch.Stop()
-
-        metricsAgent.RecordTimeSpanMetric(metricName, stopwatch.Elapsed)
-        res
