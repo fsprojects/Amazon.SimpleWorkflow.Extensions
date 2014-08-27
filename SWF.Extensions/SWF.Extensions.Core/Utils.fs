@@ -93,16 +93,11 @@ module internal Utils =
                 }
             loop 0
 
-    let inline recordCountMetric metricName f = 
-        let res = f()
-        MetricsAgent.Default.IncrementCountMetric metricName
-        res
-
-    let inline recordTimeMetric metricName f = 
+    let inline recordTimeMetric (metricsAgent : IMetricsAgent) metricName f = 
         let stopwatch = new Stopwatch()
         stopwatch.Start()
         let res = f()
         stopwatch.Stop()
 
-        MetricsAgent.Default.RecordTimeSpanMetric(metricName, stopwatch.Elapsed)
+        metricsAgent.RecordTimeSpanMetric(metricName, stopwatch.Elapsed)
         res

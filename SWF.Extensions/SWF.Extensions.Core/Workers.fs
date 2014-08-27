@@ -150,6 +150,8 @@ type ActivityWorker private (
     let heartbeatFreq = defaultArg heartbeatFreq (TimeSpan.FromMinutes 1.0)
     let concurrency   = defaultArg concurrency 1
     let logger        = LogManager.GetLogger(sprintf "ActivityWorker (Domain %s, TaskList %s, Concurrency %d)" domain tasklist concurrency)
+    let metricName    = sprintf "Activity[%s-%s]" domain tasklist
+    let work input    = recordTimeMetric metricsAgent metricName (fun () -> work input)
 
     // function to poll for activity tasks to perform
     let pollTask () = async {
@@ -172,6 +174,10 @@ type ActivityWorker private (
         while true do
             let req  = RecordActivityTaskHeartbeatRequest(TaskToken = task.TaskToken)
             let! res = swfClient.RecordActivityTaskHeartbeatAsync(req) |> Async.WithRetry
+            match res with
+            | Choice1Of2 _ -> ()
+            | Choice2Of2 _ -> metricsAgent.IncrementCountMetric(MetricNames.activityWorkerHeartbeatErrors)
+
             do! Async.Sleep(int heartbeatFreq.TotalMilliseconds)
     }
 

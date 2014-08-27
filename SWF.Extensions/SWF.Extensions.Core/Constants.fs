@@ -17,16 +17,17 @@ module Constants =
 
 [<RequireQualifiedAccess>]
 module internal MetricNames =
-    let activityTasksReceived       = "ActivityTasksReceived"
-    let activityTasksCompleted      = "ActivityTasksCompleted"
-    let activityTasksFailed         = "ActivityTasksFailed"
-    let activityWorkerApiErrors     = "ActivityWorkerApiErrors"
+    let activityTasksReceived           = "ActivityTasksReceived"
+    let activityTasksCompleted          = "ActivityTasksCompleted"
+    let activityTasksFailed             = "ActivityTasksFailed"
+    let activityWorkerApiErrors         = "ActivityWorkerApiErrors"
+    let activityWorkerHeartbeatErrors   = "ActivityWorkerHeartbeatErrors"
 
-    let decisionTasksReceived       = "DecisionTasksReceived"
-    let decisionTasksCompleted      = "DecisionTasksCompleted"
-    let decisionWorkerApiErrors     = "DecisionWorkerApiErrors"
-    let decisionWorkerLogicErrors   = "DecisionWorkerLogicErrors"
+    let decisionTasksReceived           = "DecisionTasksReceived"
+    let decisionTasksCompleted          = "DecisionTasksCompleted"
+    let decisionWorkerApiErrors         = "DecisionWorkerApiErrors"
+    let decisionWorkerLogicErrors       = "DecisionWorkerLogicErrors"
 
-    let workflowsStarted            = "WorkflowsStarted"
-    let workflowsCompleted          = "WorkflowsCompleted"
-    let workflowsFailed             = "WorkflowsFailed"
+    let workflowsStarted                = "WorkflowsStarted"
+    let workflowsCompleted              = "WorkflowsCompleted"
+    let workflowsFailed                 = "WorkflowsFailed"

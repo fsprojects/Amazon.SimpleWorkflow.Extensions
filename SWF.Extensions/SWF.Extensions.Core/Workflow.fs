@@ -94,7 +94,7 @@ type WorkflowState =
     }
 
 [<AutoOpen>]
-module WorkflowUtils =
+module internal WorkflowUtils =
     let private schedulableStateSerializer = JsonSerializer<SchedulableState>()
     let private workflowSerializer         = JsonSerializer<WorkflowState>()
 
@@ -243,15 +243,12 @@ type Activity<'TInput, 'TOutput>(name, description,
                                  ?maxAttempts) =
     let taskList    = defaultArg taskList (name + "TaskList")
     let maxAttempts = defaultArg maxAttempts 1    // by default, only attempt once, i.e. no retry
-    let metricName  = sprintf "%s-%s" name <| defaultArg version ""
 
     let inputSerializer  = JsonSerializer<'TInput>()
     let outputSerializer = JsonSerializer<'TOutput>()
     
-    let processInput input = 
-        // use Json serializer to marshall the input and output from-and-to string    
-        let f = inputSerializer.DeserializeFromString >> processor >> outputSerializer.SerializeToString
-        recordTimeMetric metricName (fun _ -> f input)
+    // use Json serializer to marshall the input and output from-and-to string    
+    let processInput = inputSerializer.DeserializeFromString >> processor >> outputSerializer.SerializeToString
     
     interface IActivity with
         member this.Name                        = name
