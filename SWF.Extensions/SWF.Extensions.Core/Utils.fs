@@ -2,6 +2,8 @@
 
 open System
 open System.Collections.Generic
+open System.Diagnostics
+open System.Threading.Tasks
 
 open Microsoft.FSharp.Quotations 
 open Microsoft.FSharp.Quotations.Patterns
@@ -10,9 +12,7 @@ open Microsoft.FSharp.Quotations.DerivedPatterns
 open Metricano
 
 [<AutoOpen>]
-module Utils =
-    open System.Diagnostics
-
+module internal Utils =
     let nullOrWs = String.IsNullOrWhiteSpace
 
     let inline str x = x.ToString()
@@ -77,12 +77,13 @@ module Utils =
 
         /// Retries the async computation up to specified number of times. Optionally accepts a function to calculate
         /// the delay in milliseconds between retries, default is exponential delay with a backoff slot of 500ms.
-        static member WithRetry (computation : Async<'a>, maxRetries, ?calcDelay) =
-            let calcDelay = defaultArg calcDelay exponentialDelay
+        static member WithRetry(computation : Task<'a>, ?maxRetries, ?calcDelay) =
+            let maxRetries = defaultArg maxRetries 3
+            let calcDelay  = defaultArg calcDelay exponentialDelay
 
             let rec loop retryCount =
                 async {
-                    let! res = computation |> Async.Catch
+                    let! res = computation |> Async.AwaitTask |> Async.Catch
                     match res with
                     | Choice1Of2 x -> return Choice1Of2 x
                     | Choice2Of2 _ when retryCount <= maxRetries -> 

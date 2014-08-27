@@ -44,8 +44,7 @@ type DecisionWorker private (
                                              TaskList     = new TaskList(Name = tasklist))
         <@ req.Identity @> <-? identity
 
-        let work = swfClient.PollForDecisionTaskAsync(req) |> Async.AwaitTask
-        let! res = Async.WithRetry(work, 3)
+        let! res = swfClient.PollForDecisionTaskAsync(req) |> Async.WithRetry
         match res with
         | Choice1Of2 pollRes -> 
             metricsAgent.IncrementCountMetric(MetricNames.decisionTasksReceived)
@@ -63,8 +62,7 @@ type DecisionWorker private (
         |> Seq.map (fun x -> x.ToSwfDecision())
         |> req.Decisions.AddRange
 
-        let work = swfClient.RespondDecisionTaskCompletedAsync(req) |> Async.AwaitTask 
-        let! res = Async.WithRetry(work, 3)
+        let! res = swfClient.RespondDecisionTaskCompletedAsync(req) |> Async.WithRetry 
         match res with
         | Choice1Of2 _   -> 
             metricsAgent.IncrementCountMetric(MetricNames.decisionTasksCompleted)
@@ -158,8 +156,7 @@ type ActivityWorker private (
         let req = PollForActivityTaskRequest(Domain = domain, TaskList = TaskList(Name = tasklist))
         <@ req.Identity @> <-? identity
 
-        let work = swfClient.PollForActivityTaskAsync(req) |> Async.AwaitTask
-        let! res = Async.WithRetry(work, 3)
+        let! res = swfClient.PollForActivityTaskAsync(req) |> Async.WithRetry
         match res with
         | Choice1Of2 pollRes -> 
             metricsAgent.IncrementCountMetric(MetricNames.activityTasksReceived)
@@ -173,9 +170,8 @@ type ActivityWorker private (
     // function to record heartbeats periodically
     let recordHeartbeat (task : ActivityTask) = async {
         while true do
-            let req = RecordActivityTaskHeartbeatRequest(TaskToken = task.TaskToken)
-            let work = swfClient.RecordActivityTaskHeartbeatAsync(req) |> Async.AwaitTask
-            do! Async.WithRetry(work, 1) |> Async.Ignore
+            let req  = RecordActivityTaskHeartbeatRequest(TaskToken = task.TaskToken)
+            let! res = swfClient.RecordActivityTaskHeartbeatAsync(req) |> Async.WithRetry
             do! Async.Sleep(int heartbeatFreq.TotalMilliseconds)
     }
 
@@ -191,8 +187,7 @@ type ActivityWorker private (
             let req = RespondActivityTaskFailedRequest(TaskToken = task.TaskToken,
                                                        Reason    = reason,
                                                        Details   = details)
-            let work = swfClient.RespondActivityTaskFailedAsync(req) |> Async.AwaitTask
-            let! res = Async.WithRetry(work, 3)
+            let! res = swfClient.RespondActivityTaskFailedAsync(req) |> Async.WithRetry
             match res with
             | Choice2Of2 exn -> 
                 metricsAgent.IncrementCountMetric(MetricNames.activityWorkerApiErrors)
@@ -207,8 +202,7 @@ type ActivityWorker private (
                 async {
                     let req = RespondActivityTaskCompletedRequest(TaskToken = task.TaskToken,
                                                                   Result    = result)
-                    let work = swfClient.RespondActivityTaskCompletedAsync(req) |> Async.AwaitTask
-                    let! res = Async.WithRetry(work, 3)
+                    let! res = swfClient.RespondActivityTaskCompletedAsync(req) |> Async.WithRetry
                     match res with
                     | Choice2Of2 exn -> 
                         metricsAgent.IncrementCountMetric(MetricNames.activityWorkerApiErrors)
