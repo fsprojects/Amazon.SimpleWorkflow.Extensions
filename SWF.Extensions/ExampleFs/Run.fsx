@@ -1,11 +1,12 @@
 ﻿#r "bin/Debug/AWSSDK.dll"
+#r "bin/Debug/Metricano.dll"
 #r "bin/Debug/SWF.Extensions.Core.dll"
-
-#load "BasicExamples.fs"
 
 open Amazon
 open Amazon.SimpleWorkflow
 open Amazon.SimpleWorkflow.Extensions
+
+#load "BasicExamples.fs"
 
 let awsKey      = "PUT_YOUR_AWS_KEY_HERE"
 let awsSecret   = "PUT_YOUR_AWS_SECRET_HERE"
