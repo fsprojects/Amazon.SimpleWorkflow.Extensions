@@ -3,6 +3,14 @@ Amazon.SimpleWorkflow.Extensions
 
 Extensions to AmazonSDK's SimpleWorkflow capabilities to make it more intuitive to use for .Net developers.
 
+
+### Maintainer(s)
+
+- [@theburningmonk](https://github.com/theburningmonk)
+
+The default maintainer account for projects under "fsprojects" is [@fsgit](https://github.com/fsgit) - F# Community Project Incubation Space (repo management)
+
+
 ### Amazon SWF ###
 Amazon's Simple Workflow (SWF) service provides a scalable platform for automating processes, or workflows in your application.
 It centers around the concept of tasks. Each task will fall into one of two categories:
