@@ -1,3 +1,6 @@
+[![Issue Stats](http://issuestats.com/github/fsprojects/Amazon.SimpleWorkflow.Extensions/badge/issue)](http://issuestats.com/github/fsprojects/Amazon.SimpleWorkflow.Extensions)
+[![Issue Stats](http://issuestats.com/github/fsprojects/Amazon.SimpleWorkflow.Extensions/badge/pr)](http://issuestats.com/github/fsprojects/Amazon.SimpleWorkflow.Extensions)
+
 Amazon.SimpleWorkflow.Extensions
 ==================================
 
@@ -49,7 +52,8 @@ I also have a series of introductory posts on how to use the library to model wo
 - Part 5 - Retries (coming soon)
 
 ### Nuget ###
-Download and install using [NuGet](https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions).
+Download and install using [NuGet](https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions). 
+[![NuGet Status](http://img.shields.io/nuget/v/Amazon.SimpleWorkflow.Extensions.svg?style=flat)](https://www.nuget.org/packages/Amazon.SimpleWorkflow.Extensions/)
 
 <a href="https://nuget.org/packages/Amazon.SimpleWorkflow.Extensions"><img src="http://theburningmonk.com/images/swf-extension-nuget-install.png" alt="NuGet package"/></a>
 
